@@ -616,9 +616,16 @@ char_b64 = boot_image_b64(boot_path, os.path.getmtime(boot_path)) if boot_path e
 
 n_lines = len(BOOT_LINES)
 reveal_s = n_lines * BOOT_STEP
-hold_s, fade_s = 0.9, 0.7
-total_s = reveal_s + hold_s + fade_s
+hold_s = 0.55
+slash_s = 1.65
+total_s = reveal_s + hold_s + slash_s
+
 p_hold = round((reveal_s + hold_s) / total_s * 100, 1)
+p_flash = round(p_hold + 2.5, 1)
+p_slash_in = round(p_hold + 7.5, 1)
+p_slash_hold = round(p_hold + 23.0, 1)
+p_wipe_end = round(p_hold + 36.0, 1)
+
 line_delays = "".join(
     ".bl%d { animation-delay: %ss; }\n" % (i, round(i * BOOT_STEP, 2))
     for i in range(n_lines)
@@ -713,21 +720,168 @@ html, body, .stApp {
     text-shadow: 2px 2px 0 #000000;
 }
 
-/* HIGH-TECH CROWDED CYBERPUNK LOADING SCREEN */
+/* HIGH-TECH CROWDED CYBERPUNK LOADING SCREEN + PERSONA-STYLE TRANSITION */
 .boot-overlay {
     position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
+    inset: 0;
     z-index: 99999;
-    background: #020202;
-    background-image: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.4) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.04));
-    background-size: 100% 4px, 8px 100%;
     pointer-events: none;
-    animation: bootOut __BOOTTOTAL__s linear forwards;
+    overflow: hidden;
+    animation: personaOverlayLife __BOOTTOTAL__s linear forwards;
 }
-@keyframes bootOut {
-    0% { opacity: 1; visibility: visible; }
-    __PHOLD__% { opacity: 1; visibility: visible; }
+@keyframes personaOverlayLife {
+    0%, 98% { opacity: 1; visibility: visible; }
     100% { opacity: 0; visibility: hidden; }
+}
+
+/* Split-screen background halves that slam open diagonally when the slash hits */
+.boot-bg-top, .boot-bg-bot {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: #020202;
+    background-image:
+        linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.45) 50%),
+        linear-gradient(90deg, rgba(255, 0, 0, 0.05), rgba(0, 255, 0, 0.03), rgba(0, 0, 255, 0.05));
+    background-size: 100% 4px, 8px 100%;
+}
+.boot-bg-top {
+    clip-path: polygon(0 0, 100% 0, 100% 40%, 0 60%);
+    animation: splitTop __BOOTTOTAL__s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+.boot-bg-bot {
+    clip-path: polygon(0 59.5%, 100% 39.5%, 100% 100%, 0 100%);
+    animation: splitBot __BOOTTOTAL__s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+@keyframes splitTop {
+    0%, __PSLASHHOLD__% { transform: translate(0, 0); }
+    __PWIPEEND__%, 100% { transform: translate(-115%, -35%); }
+}
+@keyframes splitBot {
+    0%, __PSLASHHOLD__% { transform: translate(0, 0); }
+    __PWIPEEND__%, 100% { transform: translate(115%, 35%); }
+}
+
+/* PERSONA-STYLE DIAGONAL CUT-IN SLASH & IMPACT FLASH */
+.p5-slash-flash {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    background: #ffffff;
+    opacity: 0;
+    pointer-events: none;
+    animation: p5Flash __BOOTTOTAL__s ease-out forwards;
+}
+@keyframes p5Flash {
+    0%, __PHOLD__% { opacity: 0; }
+    __PFLASH__% { opacity: 0.78; }
+    __PSLASHIN__% { opacity: 0; }
+    100% { opacity: 0; }
+}
+
+/* Jagged Persona Crimson/Neon Cut-In Ribbon */
+.p5-slash-bar {
+    position: absolute;
+    top: 38%;
+    left: -15%;
+    width: 130%;
+    height: 22vh;
+    z-index: 30;
+    background: linear-gradient(95deg, __PINK__ 0%, #090909 24%, #090909 76%, __GREEN__ 100%);
+    border-top: 6px solid #ffffff;
+    border-bottom: 6px solid #ffffff;
+    box-shadow: 0 12px 0 #000000, 0 -12px 0 #000000, 0 0 45px rgba(255, 49, 49, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    transform: rotate(-11deg) scaleY(0);
+    opacity: 0;
+    animation: p5SlashBar __BOOTTOTAL__s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.p5-slash-bar::before {
+    content: "";
+    position: absolute;
+    inset: 8px 0;
+    border-top: 2px dashed rgba(255, 255, 255, 0.45);
+    border-bottom: 2px dashed rgba(255, 255, 255, 0.45);
+    pointer-events: none;
+}
+.p5-slash-face {
+    height: 19vh;
+    width: auto;
+    filter: contrast(1.25) drop-shadow(5px 5px 0 __PINK__) drop-shadow(-3px -3px 0 __GREEN__);
+    transform: rotate(11deg) scale(1.1);
+}
+.p5-slash-text-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    line-height: 0.95;
+}
+.p5-slash-kicker {
+    font-family: Consolas, monospace;
+    font-size: 0.95rem;
+    font-weight: 900;
+    letter-spacing: 5px;
+    color: __GREEN__;
+    background: #000000;
+    padding: 3px 10px;
+    margin-bottom: 6px;
+    border: 1px solid #ffffff;
+}
+.p5-slash-text {
+    font-family: "Arial Black", Impact, sans-serif;
+    font-size: 3.4rem;
+    font-weight: 900;
+    letter-spacing: 6px;
+    color: #ffffff;
+    text-transform: uppercase;
+    text-shadow: 5px 5px 0 __PINK__, -3px -3px 0 __GREEN__;
+    white-space: nowrap;
+}
+@keyframes p5SlashBar {
+    0%, __PHOLD__% {
+        transform: rotate(-11deg) scaleY(0) translateX(-25%);
+        opacity: 0;
+    }
+    __PFLASH__% {
+        transform: rotate(-11deg) scaleY(1.12) translateX(0%);
+        opacity: 1;
+    }
+    __PSLASHIN__%, __PSLASHHOLD__% {
+        transform: rotate(-11deg) scaleY(1) translateX(1.5%);
+        opacity: 1;
+    }
+    __PWIPEEND__%, 100% {
+        transform: rotate(-11deg) scaleY(0) translateX(35%);
+        opacity: 0;
+    }
+}
+
+/* Terminal & HUD slam outward right as the slash hits */
+.boot-term {
+    animation: lineIn 0.2s ease-out forwards, p5TermExit __BOOTTOTAL__s cubic-bezier(0.7, 0, 0.2, 1) forwards !important;
+}
+@keyframes p5TermExit {
+    0%, __PHOLD__% { transform: translateX(0) skewX(0deg); opacity: 1; }
+    __PFLASH__% { transform: translateX(-22px) skewX(-6deg); opacity: 1; }
+    __PSLASHIN__%, 100% { transform: translateX(-140%) skewX(-16deg); opacity: 0; }
+}
+.boot-hud-top, .boot-hud-bottom {
+    animation: p5HudExit __BOOTTOTAL__s ease-in forwards;
+}
+@keyframes p5HudExit {
+    0%, __PHOLD__% { opacity: 1; }
+    __PFLASH__%, 100% { opacity: 0; }
+}
+.boot-char {
+    animation: bootReveal __BOOTREVEAL__s cubic-bezier(0.1, 0.8, 0.3, 1) forwards, p5CharExit __BOOTTOTAL__s cubic-bezier(0.7, 0, 0.2, 1) forwards !important;
+}
+@keyframes p5CharExit {
+    0%, __PHOLD__% { transform: translateX(0) scale(1); filter: brightness(1); opacity: 1; }
+    __PFLASH__% { transform: translateX(-30px) scale(1.08); filter: brightness(1.4) contrast(1.3); opacity: 1; }
+    __PSLASHIN__%, 100% { transform: translateX(130%) scale(1.15); opacity: 0; }
 }
 
 .boot-term {
@@ -1754,6 +1908,10 @@ for token, value in {"__PINK__": PINK, "__GREEN__": GREEN, "__BASE__": BASE,
                      "__BOOTTOTAL__": str(round(total_s, 2)),
                      "__BOOTREVEAL__": str(round(reveal_s, 2)),
                      "__PHOLD__": str(p_hold),
+                     "__PFLASH__": str(p_flash),
+                     "__PSLASHIN__": str(p_slash_in),
+                     "__PSLASHHOLD__": str(p_slash_hold),
+                     "__PWIPEEND__": str(p_wipe_end),
                      "__BOOTVH__": str(BOOT_IMAGE_VH),
                      "__LINEDELAYS__": line_delays,
                      "__WALL__": WALL_CSS, "__SIDEART__": SIDE_CSS}.items():
@@ -1878,11 +2036,23 @@ def boot_overlay_html():
         for i, line in enumerate(BOOT_LINES)
     )
     char = ""
+    slash_face = ""
     if char_b64:
         char = ('<div class="boot-char"><img src="data:image/png;base64,'
                 + char_b64 + '"></div>')
+        slash_face = ('<img class="p5-slash-face" src="data:image/png;base64,'
+                      + char_b64 + '">')
     return (
         '<div class="boot-overlay">'
+        '<div class="boot-bg-top"></div>'
+        '<div class="boot-bg-bot"></div>'
+        '<div class="p5-slash-flash"></div>'
+        '<div class="p5-slash-bar">'
+        + slash_face +
+        '<div class="p5-slash-text-wrap">'
+        '<div class="p5-slash-kicker">NEURAL LINK // SYNCHRONIZED</div>'
+        '<div class="p5-slash-text">CAPRI ONLINE</div>'
+        '</div></div>'
         '<div class="boot-hud-top">SYS_ID: 0x88F2 // HOST_LINK: ACTIVE</div>'
         '<div class="boot-hud-bottom">CORE MEMORY: 64TB // OVERCLOCK: 4.2GHz</div>'
         + char +
@@ -1908,6 +2078,119 @@ def is_fresh_visit():
     return True
 
 
+
+
+_BGM_CONTROLLER = r"""
+(function () {
+  window.__capriBgmVer = 3;
+  var D = document, W = window;
+  var legacy = D.getElementById('capri-bgm');
+  if (legacy) { legacy.pause(); legacy.remove(); }
+  W.capriBgm = function (want, vol, tracks, mood, delayMs, fadeMs) {
+    var S = W.__bgm = W.__bgm || { tracks: {}, cur: null, name: null, bound: false };
+    var k;
+    for (k in tracks) { S.tracks[k] = tracks[k]; }
+    S.vol = Math.max(0, Math.min(1, vol));
+    S.want = !!want;
+    function fade(el, to, ms, done) {
+      clearInterval(el._f);
+      var from = el.volume, t0 = Date.now();
+      el._f = setInterval(function () {
+        var p = Math.min(1, (Date.now() - t0) / ms);
+        el.volume = Math.max(0, Math.min(1, from + (to - from) * p));
+        if (p >= 1) { clearInterval(el._f); if (done) { done(); } }
+      }, 50);
+    }
+    function kill(el) { if (!el) { return; } clearInterval(el._f); el.pause(); el.remove(); }
+    if (!S.want) {
+      kill(S.cur); S.cur = null; S.name = null;
+      Array.prototype.forEach.call(D.querySelectorAll('audio.capri-bgm'), kill);
+      return;
+    }
+    if (mood && S.tracks[mood] && S.name !== mood) {
+      var el = D.createElement('audio');
+      el.className = 'capri-bgm'; el.loop = true; el.src = S.tracks[mood]; el.volume = 0;
+      D.body.appendChild(el);
+      var prev = S.cur; S.cur = el; S.name = mood;
+      var delayMs = (arguments[4] || 0);
+      var fadeMs = (arguments[5] || 2800);
+      S.waitingDelay = delayMs > 0;
+      setTimeout(function () {
+        S.waitingDelay = false;
+        if (S.cur !== el || !S.want) { return; }
+        el.play().catch(function () {});
+        fade(el, S.vol, fadeMs);
+      }, delayMs);
+      if (prev) { fade(prev, 0, 1600, function () { kill(prev); }); }
+    } else if (S.cur) {
+      fade(S.cur, S.vol, 250);
+    }
+    if (!S.bound) {
+      S.bound = true;
+      ['click', 'keydown', 'touchstart'].forEach(function (t) {
+        D.addEventListener(t, function () {
+          if (S.cur && S.cur.paused && S.want && !S.waitingDelay) { S.cur.play().catch(function () {}); }
+        }, true);
+      });
+    }
+    if (S.cur && S.cur.paused) { S.cur.play().catch(function () {}); }
+  };
+})();
+"""
+_BGM_MIME = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav", ".m4a": "audio/mp4"}
+
+
+def _find_track(name):
+    for e in _BGM_MIME:
+        p = os.path.join(HERE, "capri_" + name + e)
+        if os.path.exists(p):
+            return p
+    return None
+
+
+_MOOD_RE = {
+    "danger": re.compile(r"\b(scared|afraid|danger|careful|hide|alarm|uh-?oh|they'?re coming|trace|angry|furious|ugh|annoyed|how dare|shut up|leave me alone)\b"),
+    "sweet": re.compile(r"(\b(love|miss(ed)? you|sweet|cute|thank(s| you)|hug|cuddle|adore|aww+|proud of you|glad you|stay with me)\b|❤|💕|💗)"),
+    "happy": re.compile(r"(haha|hehe|lol|😏|\bteas(e|ing)\b|\bsilly\b|giggle)"),
+    "curious": re.compile(r"(\?|\b(why|how|hmm+|wonder|think|thinking|what if|tell me)\b)"),
+}
+
+
+def get_music_mood(bond, history):
+    """sweet / happy / curious / danger / home, from her bond and her latest reply."""
+    h = st.session_state.get("hack")
+    if h and h.get("active") and h.get("alert", 0) >= 70:
+        return "danger"                                   # the hack is going badly
+    last = ""
+    for m in reversed(history):
+        if m["role"] == "assistant":
+            last = re.sub(r"^\s*//.*$", "", m["text"], flags=re.M).replace("[ASK]", "").lower()
+            break
+    if bond < 30 or _MOOD_RE["danger"].search(last):
+        return "danger"
+    if bond >= 80 or _MOOD_RE["sweet"].search(last):
+        return "sweet"
+    if _MOOD_RE["happy"].search(last):
+        return "happy"
+    if _MOOD_RE["curious"].search(last):
+        return "curious"
+    return "home"
+
+
+def pick_music_mood():
+    """Same as above, but calm moods wait 25s before switching so it never flickers."""
+    want = get_music_mood(st.session_state.bond_level, st.session_state.history)
+    cur = st.session_state.get("music_mood")
+    now = time.time()
+    if want != cur and (cur is None or want == "danger"
+                        or now - st.session_state.get("music_mood_since", 0) >= 25):
+        st.session_state.music_mood = want
+        st.session_state.music_mood_since = now
+    return st.session_state.get("music_mood", want)
+
+
+
+
 if "history" not in st.session_state:
     st.session_state.history = []
 if "cam_key" not in st.session_state:
@@ -1931,71 +2214,46 @@ if "bond_level" not in st.session_state:
 if "hack" not in st.session_state:
     st.session_state.hack = {"active": False, "log": []}
 
-if BOOT_SCREEN and not st.session_state.booted:
-    st.session_state.booted = True
-    if is_fresh_visit():
-        try:
-            st.query_params["intro"] = str(round(time.time(), 1))
-        except Exception:
-            pass
-        overlay_box = st.empty()
-        overlay_box.markdown(boot_overlay_html(), unsafe_allow_html=True)
-        time.sleep(total_s + 0.2)
-        overlay_box.empty()
-st.session_state.booted = True
-
-photo = None
-watch_on = False
-voice_on = False
-# ---------- home music: loops quietly in the browser while the app is open ----------
-_BGM_CONTROLLER = r"""
-window.capriBgm = function (want, vol, src) {
-  var D = document, el = D.getElementById('capri-bgm');
-  if (!want) { if (el) { el.pause(); el.remove(); } return; }
-  if (!el) {
-    if (!src) return;
-    el = D.createElement('audio');
-    el.id = 'capri-bgm'; el.loop = true; el.src = src;
-    D.body.appendChild(el);
-  }
-  el.volume = Math.max(0, Math.min(1, vol));
-  el.dataset.want = '1';
-  if (!window.__capriBgmBound) {
-    window.__capriBgmBound = true;
-    ['click', 'keydown', 'touchstart'].forEach(function (t) {
-      D.addEventListener(t, function () {
-        var a = D.getElementById('capri-bgm');
-        if (a && a.paused && a.dataset.want === '1') { a.play().catch(function () {}); }
-      }, true);
-    });
-  }
-  if (el.paused) { el.play().catch(function () {}); }
-};
-"""
-_BGM_MIME = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav", ".m4a": "audio/mp4"}
 
 
-def inject_home_music(on, vol):
-    """Starts/stops/re-volumes the looping home music. Returns False if no music file exists."""
-    path = next((os.path.join(HERE, "capri_home" + e) for e in _BGM_MIME
-                 if os.path.exists(os.path.join(HERE, "capri_home" + e))), None)
+def inject_home_music(on, vol, mood="home", delay_ms=0, fade_ms=3200):
+    """Plays / crossfades the mood music. Returns the track name, or None if no music files."""
+    name = mood if _find_track(mood) else "home"
+    path = _find_track(name)
     if not path:
-        return False
-    src = ""
-    if on and not st.session_state.get("bgm_sent"):       # the file is only sent once
+        return None
+    if "bgm_sent_tracks" not in st.session_state:
+        st.session_state.bgm_sent_tracks = []
+    tracks = {}
+    if on and name not in st.session_state.bgm_sent_tracks:      # each file is only sent once
         with open(path, "rb") as f:
             data = base64.b64encode(f.read()).decode()
-        src = "data:%s;base64,%s" % (_BGM_MIME[os.path.splitext(path)[1]], data)
-        st.session_state.bgm_sent = True
+        tracks[name] = "data:%s;base64,%s" % (_BGM_MIME[os.path.splitext(path)[1]], data)
+        st.session_state.bgm_sent_tracks.append(name)
     if not on:
-        st.session_state.bgm_sent = False                 # off/on again = a fresh start
+        st.session_state.bgm_sent_tracks = []                   # off/on again = a fresh start
     html = ("<script>try{var P=window.parent,D=P.document;"
-            "if(!P.capriBgm){var s=D.createElement('script');s.textContent="
+            "if(P.__capriBgmVer!==3){var s=D.createElement('script');s.textContent="
             + json.dumps(_BGM_CONTROLLER) + ";D.head.appendChild(s);}"
             "P.capriBgm(" + ("true" if on else "false") + "," + str(vol / 100.0) + ","
-            + json.dumps(src) + ");}catch(e){}</script>")
+            + json.dumps(tracks) + "," + json.dumps(name) + ","
+            + str(int(delay_ms)) + "," + str(int(fade_ms)) + ");}catch(e){}</script>")
     components.html(html, height=0)
-    return True
+    return name
+
+
+# ---------- being nice or mean changes the bond (and so the music) ----------
+_MEAN_RE = re.compile(r"\b(shut up|stupid|idiot|hate you|useless|dumb|ugly|annoying|go away|trash|loser)\b")
+_NICE_RE = re.compile(r"\b(love you|thank you|thanks|miss you|proud of you|you'?re sweet|good job|cute|best friend|glad you)\b")
+
+
+def bond_change(msg):
+    t = msg.lower()
+    if _MEAN_RE.search(t):
+        return -6
+    if _NICE_RE.search(t):
+        return 2
+    return 1
 
 
 voice_status_box = None
@@ -2003,6 +2261,30 @@ mic_text = None
 rec = None
 diary_req = False
 
+
+
+if BOOT_SCREEN and not st.session_state.booted:
+    st.session_state.booted = True
+    if is_fresh_visit():
+        try:
+            st.query_params["intro"] = str(round(time.time(), 1))
+        except Exception:
+            pass
+        st.session_state.just_booted_bgm = True
+        overlay_box = st.empty()
+        overlay_box.markdown(boot_overlay_html(), unsafe_allow_html=True)
+        if st.session_state.get("music_on", True):
+            _slash_delay_ms = int((reveal_s + hold_s) * 1000)
+            inject_home_music(True, st.session_state.get("music_vol", 25),
+                              pick_music_mood(), delay_ms=_slash_delay_ms, fade_ms=3400)
+        time.sleep(total_s + 0.2)
+        overlay_box.empty()
+st.session_state.booted = True
+
+photo = None
+watch_on = False
+voice_on = False
+# ---------- mood music: five loops that crossfade with how she feels ----------
 def get_capri_mood(bond, text_history):
     last_reply = text_history[-1]["text"].lower() if text_history else ""
     if any(w in last_reply for w in ["haha", "hehe", "love", "miss", "😏"]):
@@ -2109,10 +2391,12 @@ with st.sidebar:
     music_vol = 25
     if music_on:
         music_vol = st.slider("music volume", 0, 100, 25, key="music_vol")
-    if not inject_home_music(music_on, music_vol):
-        st.caption("put capri_home.mp3 next to capri_app.py to get music")
+    _fade_duration = 3400 if st.session_state.pop("just_booted_bgm", False) else 2600
+    _playing = inject_home_music(music_on, music_vol, pick_music_mood(), delay_ms=0, fade_ms=_fade_duration)
+    if not _playing:
+        st.caption("put capri_home.mp3 (plus capri_sweet / happy / curious / danger .mp3) next to capri_app.py")
     elif music_on:
-        st.caption("music starts after your first click on the page.")
+        st.caption("♪ now playing: " + _playing + " · starts after your first click")
 
     voice_on = st.toggle("capri's voice", key="voice_on")
     if voice_on:
@@ -2565,7 +2849,7 @@ if user:
         st.stop()
     typing_box.empty()
 
-    st.session_state.bond_level = min(100, st.session_state.bond_level + 1)
+    st.session_state.bond_level = min(100, max(0, st.session_state.bond_level + bond_change(user)))
 
     st.session_state.history.append({"role": "assistant", "text": text})
     st.session_state.cam_key += 1
