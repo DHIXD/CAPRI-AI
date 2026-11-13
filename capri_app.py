@@ -14,6 +14,7 @@ from collections import deque
 from datetime import datetime
 import numpy as np
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 from google import genai
 from google.genai import types
@@ -163,47 +164,200 @@ Rules: always stay in character. Never say you are an AI model. Never copy
 lines from the show, speak in your own words.
 """
 
+# ---------- she texts first: she notices how long you were gone ----------
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capri_state.json")
+MISSED_AFTER_HOURS = 3        # gone longer than this -> she says she missed you
+MISSED_FALLBACK = [
+    "{away}?? we got so bored without you. don't leave us in the dark like that, hehe",
+    "you're back! it's been {away} and i counted every second. okay, maybe i lost count. whatever",
+    "ahaha finally. {away} alone in here, i started talking to the other voices in my head",
+]
+
+
+def load_last_seen():
+    try:
+        with open(STATE_FILE, "r") as f:
+            return float(json.load(f).get("last_seen", 0)) or None
+    except Exception:
+        return None
+
+
+def save_last_seen(ts):
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump({"last_seen": ts}, f)
+    except Exception:
+        pass
+
+
+def describe_gap(seconds):
+    hours = seconds / 3600
+    if hours < 24:
+        n = max(1, int(round(hours)))
+        return "%d hour%s" % (n, "" if n == 1 else "s")
+    days = int(hours // 24)
+    return "%d day%s" % (days, "" if days == 1 else "s")
+
+
+def missed_you_message():
+    """If you were away a while, returns a 'i missed you' text from her, else None."""
+    last = load_last_seen()
+    now = time.time()
+    save_last_seen(now)
+    if not last or now - last < MISSED_AFTER_HOURS * 3600:
+        return None
+    away = describe_gap(now - last)
+    try:
+        reply = client.models.generate_content(
+            model=st.session_state.get("model_pick", MODELS[0]),
+            contents=("(the host just came back after being away for " + away + ". "
+                      "Text them first, in one or two short sentences, like you missed them "
+                      "and noticed how long it was. Do not ask more than one question.)"),
+            config=types.GenerateContentConfig(
+                system_instruction=get_full_persona(), max_output_tokens=200),
+        )
+        text = (reply.text or "").strip()
+        if text:
+            return text
+    except Exception:
+        pass
+    return random.choice(MISSED_FALLBACK).format(away=away)
+
+
 MEM_EVERY = 4     # she updates her notebook after this many of your messages
 MEM_MAX = 30      # most facts she keeps
+
+
+EXTRA_STYLE = """
+The other minds inside you: about one message in six, one of the fragments you
+were made from slips in. After your normal message, add a new line that starts
+with "// " and gives the fragment's name and one very short line in its own
+tone, like "// the gruff one: tell her to stop touching things" or
+"// the shy one: ...hi". You can brush it off in your next message. Never
+explain this.
+
+Asking permission: when you want to do something dangerous, reckless or sneaky,
+ask the host sweetly in your message and end the whole message with the exact
+tag [ASK]. Use it only now and then, never two messages in a row.
+"""
+
+
+def time_note():
+    now = datetime.now()
+    h = now.hour
+    if h < 5:
+        part = "the middle of the night"
+    elif h < 12:
+        part = "morning"
+    elif h < 17:
+        part = "afternoon"
+    elif h < 21:
+        part = "evening"
+    else:
+        part = "night"
+    return ("Right now it is %s, %s (%s) for your host. Notice it naturally now and then "
+            "(sleepy hours, meals, the sky outside) but do not announce the time in every message."
+            % (now.strftime("%A"), now.strftime("%H:%M"), part))
 
 
 def get_full_persona():
     mems = load_memories()
     mem_str = "\n".join([f"- {m}" for m in mems]) if mems else "None yet."
-    return (base_persona
+    firsts = [f.get("what", "") for f in load_firsts()[-15:] if f.get("what")]
+    first_str = ("\n\nThings you have tried for the first time through your host "
+                 "(bring one up fondly now and then, never list them): "
+                 + "; ".join(firsts)) if firsts else ""
+    return (base_persona + EXTRA_STYLE
+            + "\n\n" + time_note() + first_str
             + "\n\nThings you remember about your host (use them naturally when they fit, "
               "like a close friend would. Never list them out, and never mention a notebook "
               "or memory file):\n" + mem_str)
 
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+FIRSTS_FILE = os.path.join(_HERE, "capri_firsts.json")
+DIARY_FILE = os.path.join(_HERE, "capri_diary.json")
+FIRSTS_MAX = 40
+
+
+def _read_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _write_json(path, data):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def load_firsts():
+    d = _read_json(FIRSTS_FILE, [])
+    return d if isinstance(d, list) else []
+
+
+def load_diary():
+    d = _read_json(DIARY_FILE, {})
+    return d if isinstance(d, dict) else {}
+
+
 def update_memories(batch):
-    """Asks gemini to turn your latest messages into short lasting facts."""
+    """Turns your latest messages into lasting facts AND 'first experiences'."""
     mems = load_memories()
+    firsts = load_firsts()
     prompt = (
-        "You keep a short private notebook of lasting facts about a person (the host) "
-        "for their companion character.\n\n"
-        "Current notebook:\n" + (json.dumps(mems, ensure_ascii=False) if mems else "[]") + "\n\n"
-        "Their latest messages:\n" + "\n".join("- " + b for b in batch) + "\n\n"
-        "Return the updated notebook as a JSON array of short strings "
-        "(max 120 characters each, at most %d items). Keep only lasting facts: name or nickname, "
-        "likes and dislikes, hobbies, things they are working on or planning, people and pets they "
-        "mention, running jokes, how they like to be talked to. Remove entries that are only chat "
-        "fragments or small talk, merge duplicates, and update facts that changed. "
-        "Never store passwords, ID or card numbers, addresses, or private health details. "
-        "Write each fact in third person, like 'host likes spicy ramen'. "
-        "Output only the JSON array." % MEM_MAX
+        "You keep a short private notebook for a companion character named Capri, who lives "
+        "inside her host's head and has never experienced anything herself.\n\n"
+        "Current notebook of facts about the host:\n"
+        + (json.dumps(mems, ensure_ascii=False) if mems else "[]") + "\n\n"
+        "First experiences already recorded:\n"
+        + json.dumps([f.get("what", "") for f in firsts], ensure_ascii=False) + "\n\n"
+        "The host's latest messages:\n" + "\n".join("- " + b for b in batch) + "\n\n"
+        "Return ONE JSON object with two keys.\n"
+        "\"notebook\": the updated notebook as an array of short strings (max 120 characters "
+        "each, at most %d items). Keep only lasting facts: name or nickname, likes and dislikes, "
+        "hobbies, things they are working on or planning, people and pets they mention, running "
+        "jokes, how they like to be talked to. Remove chat fragments and small talk, merge "
+        "duplicates, update facts that changed. Never store passwords, ID or card numbers, "
+        "addresses, or private health details. Write facts in third person, like "
+        "'host likes spicy ramen'.\n"
+        "\"firsts\": ONLY NEW first experiences from the latest messages that Capri could be "
+        "having for the first time through the host (a food, song, weather, place, activity), "
+        "as short phrases like 'eating spicy ramen' or 'watching the rain'. Not already "
+        "recorded. Usually empty, at most 3.\n"
+        "Output only the JSON object." % MEM_MAX
     )
     reply = client.models.generate_content(
         model=st.session_state.get("model_pick", MODELS[0]),
         contents=prompt,
         config=types.GenerateContentConfig(
-            max_output_tokens=800, response_mime_type="application/json"),
+            max_output_tokens=900, response_mime_type="application/json"),
     )
-    data = json.loads(reply.text or "[]")
+    data = json.loads(reply.text or "{}")
     if isinstance(data, list):
-        clean = [str(x).strip()[:120] for x in data if str(x).strip()]
+        data = {"notebook": data, "firsts": []}
+    if not isinstance(data, dict):
+        return
+    nb = data.get("notebook")
+    if isinstance(nb, list):
+        clean = [str(x).strip()[:120] for x in nb if str(x).strip()]
         if clean:                      # never wipe the notebook with an empty answer
             save_memories(clean[:MEM_MAX])
+    fs = data.get("firsts")
+    if isinstance(fs, list) and fs:
+        known = {f.get("what", "").lower() for f in firsts}
+        today = datetime.now().strftime("%Y-%m-%d")
+        for x in fs[:3]:
+            w = str(x).strip()[:80]
+            if w and w.lower() not in known:
+                known.add(w.lower())
+                firsts.append({"what": w, "date": today})
+        _write_json(FIRSTS_FILE, firsts[-FIRSTS_MAX:])
 
 WATCH_NOTE = """
 
@@ -730,43 +884,867 @@ __LINEDELAYS__
 }
 [data-testid="stChatInput"] textarea::placeholder { color: #999999 !important; }
 
+/* --- CAPRI // PERSONA-STYLE COMMAND SIDEBAR --- */
 [data-testid="stSidebar"] {
-    background: __BASE__ __SIDEART__ !important;
-    border-right: 4px solid __PINK__;
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 88% 12%, rgba(255,255,255,.12) 0 1px, transparent 1.8px) 0 0 / 9px 9px,
+        repeating-linear-gradient(132deg, transparent 0 28px, rgba(0,0,0,.10) 29px 32px, transparent 33px 58px),
+        linear-gradient(145deg, #ff3131 0%, #c90019 58%, #8d0010 100%) !important;
+    border-right: 6px solid #000;
+    box-shadow: 10px 0 0 #000;
 }
+[data-testid="stSidebar"]::before {
+    content: "";
+    position: absolute;
+    inset: -35% -55%;
+    z-index: 0;
+    pointer-events: none;
+    opacity: .20;
+    background: repeating-conic-gradient(from 12deg at 50% 50%,
+        transparent 0deg 8deg, #000 8.5deg 9.5deg, transparent 10deg 18deg);
+    animation: sideOrbit 48s linear infinite;
+}
+[data-testid="stSidebar"]::after {
+    content: "CAPRI // COMMAND";
+    position: absolute;
+    right: -28px;
+    bottom: 34px;
+    z-index: 0;
+    pointer-events: none;
+    color: rgba(0,0,0,.13);
+    font: 900 2.8rem/1 "Arial Black", Impact, sans-serif;
+    letter-spacing: .08em;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+}
+@keyframes sideOrbit { to { transform: rotate(360deg); } }
+
 [data-testid="stSidebar"] > div,
 [data-testid="stSidebarContent"] {
+    position: relative;
+    z-index: 1;
     background: transparent !important;
 }
-[data-testid="stSidebar"] * { color: #ffffff !important; }
-[data-testid="stSidebar"] h2 {
-    color: __PINK__ !important;
+
+/* Headings feel like slanted Persona menu labels */
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+    position: relative;
+    display: inline-block;
+    width: auto;
+    background: #050505 !important;
+    color: #fff !important;
     font-family: "Arial Black", Impact, sans-serif !important;
     text-transform: uppercase;
+    font-size: 1.12rem !important;
+    letter-spacing: 2px;
+    padding: 7px 14px !important;
+    margin: 22px 0 14px -9px !important;
+    border: 2px solid #fff;
+    box-shadow: 5px 5px 0 __GREEN__;
+    transform: skew(-13deg) rotate(-2deg);
+    transition: transform .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s;
 }
+[data-testid="stSidebar"] h2:hover,
+[data-testid="stSidebar"] h3:hover {
+    transform: skew(-13deg) rotate(1deg) translateX(7px);
+    box-shadow: -3px 5px 0 __GREEN__;
+}
+
+/* Actual controls become animated command rows, not static tiles */
+[data-testid="stSidebar"] .stButton button,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    width: 91% !important;
+    min-height: 42px;
+    margin: 7px auto 11px 4% !important;
+    padding: 7px 13px !important;
+    background: #050505 !important;
+    color: #fff !important;
+    border: 2px solid #fff !important;
+    border-radius: 0 !important;
+    box-shadow: 5px 5px 0 rgba(0,0,0,.75) !important;
+    transform: skew(-13deg) rotate(-1.3deg) translateX(0);
+    transition:
+        transform .22s cubic-bezier(.18,.85,.25,1.25),
+        background .18s ease, border-color .18s ease,
+        box-shadow .22s ease, filter .22s ease !important;
+    cursor: pointer;
+}
+[data-testid="stSidebar"] .stButton button::before,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    background: __PINK__;
+    transform: translateX(-110%) skew(-20deg);
+    transition: transform .26s cubic-bezier(.2,.8,.2,1);
+}
+[data-testid="stSidebar"] .stButton button::after,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button::after {
+    content: "›";
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    color: __GREEN__;
+    font: 900 1.6rem/1 "Arial Black", sans-serif;
+    opacity: 0;
+    transform: translate(-12px,-50%);
+    transition: opacity .16s ease, transform .22s ease;
+}
+[data-testid="stSidebar"] .stButton button p,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button p {
+    position: relative;
+    z-index: 1;
+    color: #fff !important;
+    font-family: "Arial Black", Impact, sans-serif !important;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-size: .96rem !important;
+    font-weight: 900 !important;
+    transform: skew(13deg);
+    text-shadow: 2px 2px 0 #8d0010;
+    transition: transform .2s ease, letter-spacing .2s ease, color .18s ease;
+}
+[data-testid="stSidebar"] .stButton button:hover,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover {
+    background: #050505 !important;
+    border-color: __GREEN__ !important;
+    box-shadow: 7px 7px 0 #050505, 0 0 0 2px __GREEN__ !important;
+    transform: skew(-13deg) rotate(1.2deg) translateX(9px) scale(1.025) !important;
+    filter: drop-shadow(0 0 7px rgba(128,220,88,.35));
+}
+[data-testid="stSidebar"] .stButton button:hover::before,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover::before {
+    transform: translateX(0) skew(-20deg);
+}
+[data-testid="stSidebar"] .stButton button:hover::after,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover::after {
+    opacity: 1;
+    transform: translate(0,-50%);
+}
+[data-testid="stSidebar"] .stButton button:hover p,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover p {
+    color: #fff !important;
+    letter-spacing: 2px;
+    transform: skew(13deg) translateX(2px);
+    text-shadow: 2px 2px 0 #000;
+}
+[data-testid="stSidebar"] .stButton button:active,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:active {
+    transform: skew(-13deg) scale(.96) translate(3px,3px) !important;
+    box-shadow: 1px 1px 0 #050505 !important;
+    filter: brightness(1.25);
+}
+[data-testid="stSidebar"] .stButton button:focus-visible,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:focus-visible {
+    outline: 3px dashed __GREEN__ !important;
+    outline-offset: 5px;
+}
+
+/* Toggles, selects and expanders get the same high-contrast menu language */
+[data-testid="stSidebar"] [data-testid="stToggle"] {
+    padding: 8px 10px;
+    margin: 5px 0 9px;
+    background: rgba(0,0,0,.78);
+    border-left: 3px solid #fff;
+    transition: border-color .2s, transform .2s, background .2s;
+}
+[data-testid="stSidebar"] [data-testid="stToggle"]:hover {
+    border-left-color: __GREEN__;
+    background: rgba(0,0,0,.94);
+    transform: translateX(5px);
+}
+[data-testid="stSidebar"] [data-testid="stToggle"] label,
+[data-testid="stSidebar"] [data-testid="stCheckbox"] label {
+    color: #fff !important;
+    font-weight: 800 !important;
+}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
+[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div,
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section,
+[data-testid="stSidebar"] [data-testid="stExpander"] {
+    background: rgba(0,0,0,.88) !important;
+    color: #fff !important;
+    border: 2px solid #fff !important;
+    border-radius: 0 !important;
+    box-shadow: 4px 4px 0 rgba(0,0,0,.65);
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary {
+    font-family: "Arial Black", Impact, sans-serif;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"]:hover {
+    border-color: __GREEN__ !important;
+    transform: translateX(3px);
+    transition: transform .18s ease, border-color .18s ease;
+}
+[data-testid="stSidebar"] [data-testid="stProgress"] > div {
+    background: rgba(0,0,0,.7) !important;
+    border: 2px solid #fff;
+    border-radius: 0 !important;
+    padding: 2px;
+}
+[data-testid="stSidebar"] [data-testid="stProgress"] > div > div {
+    background: repeating-linear-gradient(135deg, __GREEN__ 0 8px, #4f9c35 8px 13px) !important;
+    background-size: 22px 22px;
+    animation: progressRun .7s linear infinite;
+}
+@keyframes progressRun { to { background-position: 22px 0; } }
+
+/* Capri's portrait has a living idle animation */
 .side-card {
-    width: __SIDECARD__px;
-    border: 4px solid #ffffff;
-    box-shadow: 6px 6px 0 __PINK__;
-    margin: 4px 0 28px 4px;
-    line-height: 0;
-    background: #ffffff;
+    position: relative;
+    width: 170px;
+    border: 4px solid #000;
+    box-shadow: 6px 6px 0 #fff;
+    margin: 10px auto 25px;
+    background: #000;
+    transform: skew(-5deg) rotate(-4deg);
+    animation: portraitFloat 4s ease-in-out infinite;
+    transition: transform .28s cubic-bezier(.2,.8,.2,1), box-shadow .25s;
+}
+.side-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(transparent 48%, rgba(255,255,255,.16) 50%, transparent 53%);
+    background-size: 100% 12px;
+    opacity: .28;
+    animation: portraitScan 5s linear infinite;
+}
+.side-card:hover {
+    transform: skew(-3deg) rotate(0deg) scale(1.045);
+    box-shadow: 9px 9px 0 __GREEN__;
 }
 .side-card img { width: 100%; display: block; }
-[data-testid="stSidebar"] .stButton button {
-    background: __GREEN__ !important;
-    border: 3px solid #ffffff !important;
-    border-radius: 0 !important;
-    box-shadow: 4px 4px 0 __PINK__;
+@keyframes portraitFloat {
+    0%,100% { translate: 0 0; }
+    50% { translate: 0 -5px; }
 }
-[data-testid="stSidebar"] .stButton button p {
-    color: #111111 !important;
+@keyframes portraitScan { to { background-position: 0 24px; } }
+
+/* Status panel: moving scanline + sync pulse */
+.p5-status-box {
+    position: relative;
+    overflow: hidden;
+    background: #050505;
+    border: 3px solid #fff;
+    box-shadow: 6px 6px 0 __GREEN__;
+    padding: 14px;
+    margin-bottom: 20px;
+    transform: skew(-8deg) rotate(-1deg);
+}
+.p5-status-box::after {
+    content: "";
+    position: absolute;
+    inset: -100% 0;
+    pointer-events: none;
+    background: linear-gradient(transparent, rgba(128,220,88,.15), transparent);
+    animation: statusScan 4s linear infinite;
+}
+@keyframes statusScan { to { transform: translateY(200%); } }
+.p5-mood-tag {
+    background: __GREEN__;
+    color: #000 !important;
+    font-family: "Arial Black", Impact, sans-serif;
     font-weight: 900;
+    padding: 3px 10px;
+    display: inline-block;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    transform: skew(4deg);
+    animation: moodPop 3.8s ease-in-out infinite;
 }
-[data-testid="stSidebar"] [data-testid="stExpander"] details {
-    border: 3px solid #ffffff;
-    border-radius: 0;
+@keyframes moodPop { 0%,90%,100% { filter: brightness(1); } 93% { filter: brightness(1.7); } }
+.p5-sync-row {
+    font-family: "Arial Black", Impact, sans-serif;
+    font-size: .95rem;
+    color: #fff;
+    letter-spacing: 1px;
 }
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    [data-testid="stSidebar"]::before, .side-card, .side-card::after,
+    .p5-status-box::after, .p5-mood-tag,
+    [data-testid="stSidebar"] [data-testid="stProgress"] > div > div {
+        animation: none !important;
+    }
+    [data-testid="stSidebar"] .stButton button,
+    [data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
+        transition: none !important;
+    }
+}
+
+/* --- CAPRI // EDITORIAL COMMAND LAYER --- */
+.capri-side-masthead {
+    position: relative;
+    margin: 4px 2px 18px;
+    padding: 12px 12px 10px;
+    color: #fff;
+    background: #050505;
+    border: 2px solid #fff;
+    box-shadow: 6px 6px 0 __GREEN__;
+    transform: skew(-5deg) rotate(-1deg);
+    overflow: hidden;
+}
+.capri-side-masthead::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: .22;
+    background: repeating-linear-gradient(135deg, transparent 0 9px, #fff 10px 11px, transparent 12px 19px);
+    transform: translateX(-65%);
+    animation: mastheadSweep 7s ease-in-out infinite;
+}
+@keyframes mastheadSweep { 0%,65%,100% { transform: translateX(-65%); } 82% { transform: translateX(65%); } }
+.capri-side-topline, .capri-side-subline, .capri-side-wordmark { position: relative; z-index: 1; }
+.capri-side-topline { display:flex; align-items:center; gap:7px; font: 900 .58rem/1.2 Consolas, monospace; letter-spacing:1.2px; color:#ddd; }
+.capri-live-dot { width:7px; height:7px; display:inline-block; border-radius:50%; background:__GREEN__; box-shadow:0 0 9px __GREEN__; animation: liveBlink 1.2s steps(2,end) infinite; }
+@keyframes liveBlink { 50% { opacity:.25; } }
+.capri-side-wordmark { margin-top:3px; font: 1000 2.65rem/.95 "Arial Black", Impact, sans-serif; letter-spacing:-2px; text-shadow:3px 3px 0 __PINK__; }
+.capri-side-wordmark span { color:__GREEN__; animation: cursorBlink 1s steps(2,end) infinite; }
+@keyframes cursorBlink { 50% { opacity:0; } }
+.capri-side-subline { margin-top:7px; font:800 .55rem/1.3 Consolas, monospace; letter-spacing:1px; color:#bbb; }
+.capri-side-subline b { color:__GREEN__; }
+.capri-side-rule { height:5px; margin-top:10px; background:__PINK__; transform:skew(-25deg); }
+.capri-side-rule i { display:block; width:28%; height:100%; background:__GREEN__; box-shadow:0 0 8px __GREEN__; animation: ruleTravel 2.8s ease-in-out infinite alternate; }
+@keyframes ruleTravel { from { margin-left:0; } to { margin-left:72%; } }
+
+/* Portrait becomes a character panel, not a floating thumbnail. */
+.side-portrait-stage { position:relative; margin:3px auto 19px; padding:17px 8px 8px; width:100%; }
+.side-portrait-stage::before { content:""; position:absolute; inset:5px 13px 19px 4px; border:1px solid rgba(255,255,255,.65); transform:rotate(5deg); pointer-events:none; }
+.side-portrait-stage::after { content:""; position:absolute; right:4px; top:17px; width:32px; height:32px; border-top:5px solid __GREEN__; border-right:5px solid __GREEN__; pointer-events:none; }
+.side-portrait-stamp { position:relative; z-index:2; width:max-content; margin:0 0 -7px 12px; padding:4px 9px; color:#000; background:__GREEN__; font:900 .62rem/1 "Arial Black",Impact,sans-serif; letter-spacing:1.4px; transform:rotate(-4deg); box-shadow:3px 3px 0 #000; }
+.side-portrait-stamp span { color:__PINK__; font-size:.7rem; }
+.side-card { z-index:1; width:min(178px,76%); margin:0 auto 7px; border:4px solid #050505; outline:2px solid #fff; box-shadow:8px 8px 0 __PINK__; transform:rotate(-3deg); }
+.side-card:hover { transform:rotate(1deg) translateY(-4px) scale(1.035); box-shadow:10px 10px 0 __GREEN__; }
+.side-portrait-index { position:relative; z-index:2; width:max-content; margin:8px 5px 0 auto; padding:3px 8px; background:#050505; border-left:3px solid __GREEN__; color:#fff; font:900 .58rem/1.2 Consolas,monospace; letter-spacing:1.3px; transform:skew(-12deg); }
+.side-portrait-index b { color:__PINK__; }
+
+/* Make every interactive control respond as one designed interface. */
+[data-testid="stSidebar"] [data-testid="stTextInput"] input,
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="combobox"] {
+    transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease !important;
+}
+[data-testid="stSidebar"] [data-testid="stTextInput"]:focus-within,
+[data-testid="stSidebar"] [data-testid="stSelectbox"]:focus-within {
+    transform:translateX(3px);
+    filter:drop-shadow(4px 4px 0 rgba(0,0,0,.7));
+}
+[data-testid="stSidebar"] [data-testid="stTextInput"]:focus-within input,
+[data-testid="stSidebar"] [data-testid="stSelectbox"]:focus-within [role="combobox"] {
+    border-color:__GREEN__ !important;
+    box-shadow:0 0 0 2px #050505, 0 0 0 4px __GREEN__ !important;
+}
+[data-testid="stSidebar"] [data-testid="stToggle"] [role="switch"] {
+    transition:transform .2s cubic-bezier(.2,.8,.2,1), filter .2s ease;
+}
+[data-testid="stSidebar"] [data-testid="stToggle"]:hover [role="switch"] {
+    transform:scale(1.12) rotate(-5deg);
+    filter:drop-shadow(0 0 5px __GREEN__);
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary {
+    position:relative;
+    transition:padding-left .2s ease, color .2s ease;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover { padding-left:18px; color:__GREEN__ !important; }
+[data-testid="stSidebar"] [data-testid="stExpander"] summary svg { transition:transform .22s ease; }
+[data-testid="stSidebar"] [data-testid="stExpander"][open] summary svg { transform:rotate(90deg); }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { padding-left:3px; border-left:2px solid rgba(255,255,255,.55); }
+
+/* Less constant movement; keep the punch for actual hover and selection. */
+@media (prefers-reduced-motion: reduce) {
+    .capri-side-masthead::before, .capri-live-dot, .capri-side-wordmark span,
+    .capri-side-rule i { animation:none !important; }
+}
+
+
+/* --- CAPRI // NEON-LIT HARDWARE FINISH ---
+/* Keep the Persona angles, but replace flat square slabs with softly cut,
+   illuminated surfaces inspired by Capri's luminous green/pink character art. */
+:root {
+    --capri-green: __GREEN__;
+    --capri-pink: __PINK__;
+    --capri-cyan: #19e6d2;
+}
+
+/* Ambient light pools behind the sidebar instead of a flat red sheet. */
+[data-testid="stSidebar"] {
+    background:
+        radial-gradient(ellipse at 78% 20%, rgba(128,220,88,.24), transparent 34%),
+        radial-gradient(ellipse at 12% 76%, rgba(25,230,210,.16), transparent 30%),
+        radial-gradient(ellipse at 90% 88%, rgba(255,49,49,.25), transparent 36%),
+        repeating-linear-gradient(132deg, transparent 0 28px, rgba(0,0,0,.10) 29px 32px, transparent 33px 58px),
+        linear-gradient(145deg, #ff3131 0%, #c90019 58%, #8d0010 100%) !important;
+}
+
+/* A soft illuminated rim with a slow moving highlight. */
+.capri-side-masthead,
+.p5-status-box,
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
+[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div,
+[data-testid="stSidebar"] [data-testid="stExpander"],
+[data-testid="stSidebar"] .stButton button,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
+    border-radius: 9px !important;
+    border: 1px solid rgba(255,255,255,.82) !important;
+    box-shadow:
+        0 0 0 1px rgba(0,0,0,.9),
+        0 0 8px rgba(128,220,88,.42),
+        0 0 19px rgba(128,220,88,.18),
+        inset 0 0 13px rgba(255,255,255,.045) !important;
+    transition: border-color .22s ease, box-shadow .25s ease,
+                transform .25s cubic-bezier(.2,.8,.2,1), filter .25s ease !important;
+}
+
+/* Thin animated light that travels along the panel edge. */
+.capri-side-masthead::after,
+.p5-status-box::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    background: linear-gradient(115deg,
+        transparent 4%, rgba(255,255,255,.1) 22%,
+        __GREEN__ 42%, #19e6d2 53%, __PINK__ 68%, transparent 88%);
+    background-size: 240% 100%;
+    animation: capriEdgeLight 5.5s linear infinite;
+    opacity: .78;
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+}
+@keyframes capriEdgeLight {
+    from { background-position: 100% 0; }
+    to { background-position: -140% 0; }
+}
+
+/* Buttons glow on hover like illuminated controls, not hard paper cut-outs. */
+[data-testid="stSidebar"] .stButton button:hover,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover {
+    border-color: __GREEN__ !important;
+    box-shadow:
+        0 0 0 1px #050505,
+        0 0 7px __GREEN__,
+        0 0 18px rgba(128,220,88,.72),
+        0 0 34px rgba(128,220,88,.24),
+        inset 0 0 15px rgba(128,220,88,.16) !important;
+    filter: brightness(1.12) saturate(1.12);
+}
+
+/* Inputs and dropdowns get a soft inner glow when active. */
+[data-testid="stSidebar"] [data-testid="stTextInput"]:focus-within,
+[data-testid="stSidebar"] [data-testid="stSelectbox"]:focus-within {
+    filter: drop-shadow(0 0 7px rgba(128,220,88,.55)) !important;
+}
+[data-testid="stSidebar"] [data-testid="stTextInput"]:focus-within input,
+[data-testid="stSidebar"] [data-testid="stSelectbox"]:focus-within [role="combobox"] {
+    border-color: __GREEN__ !important;
+    box-shadow: inset 0 0 12px rgba(128,220,88,.15), 0 0 12px rgba(128,220,88,.48) !important;
+}
+
+/* Character portrait: luminous aura rather than a plain offset shadow. */
+.side-card {
+    border-radius: 7px !important;
+    border-color: rgba(255,255,255,.92) !important;
+    outline: 1px solid rgba(128,220,88,.85) !important;
+    box-shadow:
+        0 0 0 3px rgba(0,0,0,.92),
+        0 0 12px rgba(128,220,88,.65),
+        0 0 28px rgba(25,230,210,.25) !important;
+}
+.side-card:hover {
+    box-shadow:
+        0 0 0 3px rgba(0,0,0,.92),
+        0 0 15px __GREEN__,
+        0 0 34px rgba(25,230,210,.48),
+        0 0 48px rgba(255,49,49,.2) !important;
+}
+
+/* Status panel keeps its slanted silhouette, now with a lit edge. */
+.p5-status-box {
+    border-color: rgba(255,255,255,.92) !important;
+    box-shadow: 0 0 12px rgba(128,220,88,.3),
+                0 0 26px rgba(128,220,88,.12),
+                inset 0 0 24px rgba(128,220,88,.07) !important;
+}
+
+/* Chat area echoes the same illuminated material. */
+[data-testid="stChatMessage"] {
+    border-radius: 10px !important;
+    box-shadow: 0 0 10px rgba(128,220,88,.2),
+                inset 0 0 18px rgba(255,255,255,.035) !important;
+}
+[data-testid="stChatInput"] {
+    border-radius: 12px !important;
+    box-shadow: 0 0 12px rgba(128,220,88,.32),
+                0 0 26px rgba(128,220,88,.12) !important;
+}
+[data-testid="stChatInput"] > div { border-radius: 9px !important; }
+
+@media (prefers-reduced-motion: reduce) {
+    .capri-side-masthead::after, .p5-status-box::before { animation: none !important; }
+}
+
+/* --- CAPRI // BOLD LIGHTNING-CUT PANELS ---
+   The panel silhouette itself is jagged and substantial; the glow follows
+   the whole cut shape instead of being a thin line around a square box. */
+:root {
+    --capri-zap: #80dc58;
+    --capri-zap-cyan: #19e6d2;
+    --capri-zap-red: #ff3131;
+}
+
+/* Main identity + status become chunky electric plates. */
+.capri-side-masthead {
+    border-radius: 0 !important;
+    clip-path: polygon(
+        0 12%, 7% 12%, 5% 0, 100% 0,
+        96% 25%, 100% 31%, 94% 100%,
+        4% 100%, 7% 76%, 0 70%
+    );
+    /* Filter outlines follow the clipped silhouette exactly. */
+    filter:
+        drop-shadow(0 0 1.15px rgba(255,255,255,.98))
+        drop-shadow(6px 5px 0 #050505)
+        drop-shadow(0 0 7px rgba(128,220,88,.9))
+        drop-shadow(0 0 17px rgba(25,230,210,.38));
+    padding: 16px 15px 19px !important;
+    margin: 8px 5px 24px 2px !important;
+    background: linear-gradient(115deg, #050505 0 72%, #171717 72% 100%) !important;
+}
+.capri-side-masthead::after {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    pointer-events: none;
+    inset: 0;
+    opacity: .25;
+    background: linear-gradient(115deg, transparent 0 43%, var(--capri-zap) 44% 47%, transparent 48% 100%);
+    clip-path: polygon(0 12%, 7% 12%, 5% 0, 100% 0, 96% 25%, 100% 31%, 94% 100%, 4% 100%, 7% 76%, 0 70%);
+}
+
+.p5-status-box {
+    border-radius: 0 !important;
+    clip-path: polygon(
+        0 10%, 8% 10%, 5% 0, 100% 0,
+        95% 29%, 100% 36%, 92% 100%,
+        0 100%, 5% 66%, 0 59%
+    );
+    padding: 20px 18px 22px !important;
+    margin: 7px 8px 25px 2px !important;
+    /* One crisp white edge, generated from the same clipped alpha shape. */
+    border: 0 !important;
+    filter:
+        drop-shadow(0 0 1.25px rgba(255,255,255,.98))
+        drop-shadow(7px 6px 0 #050505)
+        drop-shadow(0 0 8px rgba(128,220,88,.85))
+        drop-shadow(0 0 19px rgba(25,230,210,.32));
+    background: linear-gradient(120deg, #050505 0 76%, #101b12 76% 100%) !important;
+}
+.p5-status-box::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: .22;
+    background: linear-gradient(120deg, transparent 0 38%, var(--capri-zap) 39% 43%, transparent 44% 100%);
+}
+.p5-status-box::after {
+    opacity: .8;
+    background: linear-gradient(transparent, rgba(128,220,88,.19), transparent);
+}
+
+/* Settings controls get matching lightning-cut corners, not tiny rounded cards. */
+[data-testid="stSidebar"] .stButton button,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
+    border-radius: 0 !important;
+    clip-path: polygon(0 14%, 7% 14%, 5% 0, 100% 0, 95% 34%, 100% 42%, 94% 100%, 0 100%, 4% 61%, 0 54%);
+    border: 0 !important;
+    filter: drop-shadow(0 0 1.1px rgba(255,255,255,.98))
+            drop-shadow(4px 4px 0 #050505)
+            drop-shadow(0 0 5px rgba(128,220,88,.42));
+    margin-top: 10px !important;
+    margin-bottom: 14px !important;
+}
+[data-testid="stSidebar"] .stButton button:hover,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover {
+    filter: drop-shadow(0 0 1.1px rgba(255,255,255,.98))
+            drop-shadow(5px 5px 0 #050505)
+            drop-shadow(0 0 8px var(--capri-zap))
+            drop-shadow(0 0 17px rgba(128,220,88,.7)) brightness(1.12) !important;
+    transform: translateX(5px) skewX(-2deg) !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
+[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div,
+[data-testid="stSidebar"] [data-testid="stExpander"] {
+    border-radius: 0 !important;
+    clip-path: polygon(0 12%, 6% 12%, 4% 0, 100% 0, 96% 35%, 100% 43%, 94% 100%, 0 100%, 4% 62%, 0 54%);
+    border: 0 !important;
+    filter: drop-shadow(0 0 1.1px rgba(255,255,255,.98))
+            drop-shadow(4px 4px 0 rgba(0,0,0,.9))
+            drop-shadow(0 0 6px rgba(128,220,88,.38));
+}
+[data-testid="stSidebar"] [data-testid="stTextInput"] input,
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="combobox"] {
+    border-radius: 0 !important;
+}
+[data-testid="stSidebar"] [data-testid="stSelectbox"]:focus-within,
+[data-testid="stSidebar"] [data-testid="stTextInput"]:focus-within {
+    filter: drop-shadow(5px 5px 0 #050505)
+            drop-shadow(0 0 9px var(--capri-zap)) !important;
+}
+
+/* A short, bold electric slash reinforces the shape language in section labels. */
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+    border-radius: 0 !important;
+    clip-path: polygon(0 12%, 9% 12%, 7% 0, 100% 0, 94% 100%, 0 100%, 4% 54%);
+    filter: drop-shadow(0 0 1.1px rgba(255,255,255,.98))
+            drop-shadow(4px 4px 0 #050505)
+            drop-shadow(0 0 7px rgba(128,220,88,.55));
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .capri-side-masthead, .p5-status-box,
+    [data-testid="stSidebar"] .stButton button {
+        transition: none !important;
+    }
+}
+
+
+/* --- CAPRI // VOLTAGE UPGRADE ---
+   Same lightning-cut language, now charged: a live bolt down the edge,
+   lit switches, a bolt-shaped slider, glitching wordmark and zap badge. */
+
+/* a live lightning bolt running down the sidebar's right edge */
+[data-testid="stSidebarUserContent"] { position: relative; }
+[data-testid="stSidebarUserContent"]::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0; right: 0;
+    width: 26px;
+    z-index: 0;
+    pointer-events: none;
+    background: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='220' viewBox='0 0 26 220'%3E%3Cpath d='M13 0 L5 46 L15 50 L6 104 L18 108 L8 166 L16 170 L13 220' fill='none' stroke='%2380dc58' stroke-width='3'/%3E%3Cpath d='M13 0 L5 46 L15 50 L6 104 L18 108 L8 166 L16 170 L13 220' fill='none' stroke='%23ffffff' stroke-width='1'/%3E%3C/svg%3E") repeat-y;
+    background-size: 26px 220px;
+    filter: drop-shadow(0 0 4px __GREEN__) drop-shadow(0 0 10px rgba(25,230,210,.55));
+    opacity: .4;
+    animation: boltStrike 6s infinite;
+}
+@keyframes boltStrike {
+    0%, 84%, 100% { opacity: .38; }
+    86% { opacity: 1; }
+    88% { opacity: .22; }
+    90% { opacity: 1; }
+    94% { opacity: .5; }
+}
+
+/* section labels carry a bolt */
+[data-testid="stSidebar"] h2::before,
+[data-testid="stSidebar"] h3::before {
+    content: "ϟ";
+    display: inline-block;
+    margin-right: 9px;
+    color: __GREEN__;
+    text-shadow: 0 0 8px __GREEN__;
+    transition: transform .2s cubic-bezier(.2,.8,.2,1);
+}
+[data-testid="stSidebar"] h2:hover::before,
+[data-testid="stSidebar"] h3:hover::before { transform: translateX(4px) scale(1.3); }
+
+/* switches become lightning-cut rows that light up when ON */
+[data-testid="stSidebar"] label[data-baseweb="checkbox"] {
+    padding: 9px 22px 9px 12px;
+    margin: 6px 4px 10px 0;
+    background: linear-gradient(100deg, rgba(0,0,0,.88) 0 78%, rgba(0,0,0,.62));
+    border-left: 3px solid rgba(255,255,255,.8);
+    clip-path: polygon(0 0, 100% 0, 95% 50%, 100% 100%, 0 100%);
+    transition: background .28s ease, border-color .22s ease, transform .2s ease;
+}
+[data-testid="stSidebar"] label[data-baseweb="checkbox"]:hover { transform: translateX(5px); }
+[data-testid="stSidebar"] label[data-baseweb="checkbox"]:has(input:checked) {
+    background: linear-gradient(100deg, rgba(128,220,88,.34), rgba(0,0,0,.9) 62%);
+    border-left-color: __GREEN__;
+}
+
+/* meters end in a lightning notch and glow */
+[data-testid="stSidebar"] [data-testid="stProgress"] > div {
+    box-shadow: 0 0 12px rgba(128,220,88,.45), 4px 4px 0 rgba(0,0,0,.7);
+}
+[data-testid="stSidebar"] [data-testid="stProgress"] > div > div {
+    clip-path: polygon(0 0, 100% 0, calc(100% - 9px) 50%, 100% 100%, 0 100%);
+}
+
+/* the slider handle is a little bolt */
+[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
+    background: __GREEN__ !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    clip-path: polygon(62% 0, 14% 56%, 46% 56%, 30% 100%, 88% 38%, 56% 38%);
+    scale: 1.9;
+}
+[data-testid="stSidebar"] [data-testid="stSliderThumbValue"] {
+    color: #fff !important;
+    font-weight: 900 !important;
+    text-shadow: 0 0 6px __GREEN__;
+}
+
+/* big charged bond number */
+.p5-sync-row span { font-size: 1.5rem; text-shadow: 0 0 10px rgba(255,49,49,.9); }
+
+/* wordmark glitches now and then; zap badge pulses */
+.capri-side-wordmark { animation: wordGlitch 7s infinite; }
+@keyframes wordGlitch {
+    0%, 89%, 100% { transform: none; text-shadow: 3px 3px 0 __PINK__; }
+    91% { transform: translateX(-3px); text-shadow: -3px 0 #19e6d2, 3px 0 __PINK__; }
+    93% { transform: translateX(3px) skewX(-6deg); text-shadow: 3px 0 #19e6d2, -3px 0 __PINK__; }
+    95% { transform: none; text-shadow: 3px 3px 0 __PINK__; }
+}
+.capri-bolt-badge {
+    position: absolute;
+    right: 14px; top: 9px;
+    z-index: 2;
+    font: 900 1.7rem/1 "Arial Black", Impact, sans-serif;
+    color: __GREEN__;
+    text-shadow: 0 0 8px __GREEN__, 0 0 18px #19e6d2;
+    animation: badgeZap 3s infinite;
+}
+@keyframes badgeZap {
+    0%, 78%, 100% { opacity: .75; transform: scale(1) rotate(0); }
+    83% { opacity: 1; transform: scale(1.4) rotate(-9deg); }
+    88% { opacity: .5; transform: scale(1) rotate(0); }
+}
+
+/* thin charged scrollbar */
+[data-testid="stSidebar"] *::-webkit-scrollbar { width: 8px; }
+[data-testid="stSidebar"] *::-webkit-scrollbar-track { background: rgba(0,0,0,.55); }
+[data-testid="stSidebar"] *::-webkit-scrollbar-thumb {
+    background: linear-gradient(__GREEN__, #19e6d2);
+    border: 1px solid #050505;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [data-testid="stSidebarUserContent"]::after, .capri-side-wordmark, .capri-bolt-badge { animation: none !important; }
+}
+
+
+/* --- CAPRI // OUTLINE POLISH ---
+   Before: the white edge + shadow sat on the same element as the jagged cut,
+   so the cut sliced them off. Now the outline is drawn OUTSIDE the cut shape,
+   so every plate, button and field has a crisp edge that follows its zigzag. */
+
+/* plates (identity + status): outline lives on a wrapper */
+.capri-side-masthead, .p5-status-box { filter: none !important; }
+.plate-fx {
+    filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff)
+            drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
+            drop-shadow(7px 6px 0 #050505)
+            drop-shadow(0 0 10px rgba(128,220,88,.5));
+    transition: filter .25s ease;
+}
+.plate-fx:hover {
+    filter: drop-shadow(2px 0 0 __GREEN__) drop-shadow(-2px 0 0 __GREEN__)
+            drop-shadow(0 2px 0 __GREEN__) drop-shadow(0 -2px 0 __GREEN__)
+            drop-shadow(7px 6px 0 #050505)
+            drop-shadow(0 0 16px rgba(128,220,88,.75));
+}
+
+/* buttons: outline on the widget wrapper, button itself stays clean */
+[data-testid="stSidebar"] .stButton,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] {
+    filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff)
+            drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
+            drop-shadow(5px 5px 0 #050505)
+            drop-shadow(0 0 7px rgba(128,220,88,.4));
+    transition: filter .2s ease;
+}
+[data-testid="stSidebar"] .stButton:hover,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"]:hover {
+    filter: drop-shadow(2px 0 0 __GREEN__) drop-shadow(-2px 0 0 __GREEN__)
+            drop-shadow(0 2px 0 __GREEN__) drop-shadow(0 -2px 0 __GREEN__)
+            drop-shadow(5px 5px 0 #050505)
+            drop-shadow(0 0 14px rgba(128,220,88,.75));
+}
+[data-testid="stSidebar"] .stButton button,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button { filter: none !important; }
+
+/* section labels: same crisp edge, from their wrapper */
+[data-testid="stSidebar"] [data-testid="stHeading"] {
+    filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff)
+            drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
+            drop-shadow(4px 4px 0 #050505)
+            drop-shadow(0 0 6px rgba(128,220,88,.45));
+}
+[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
+    filter: none !important;
+    border: 0 !important;
+}
+
+/* fields, dropdowns, expanders and switches: outline layer sits behind the content */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
+[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div,
+[data-testid="stSidebar"] [data-testid="stExpander"],
+[data-testid="stSidebar"] label[data-baseweb="checkbox"] {
+    position: relative;
+    isolation: isolate;
+    clip-path: none !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    filter: drop-shadow(4px 4px 0 #050505) drop-shadow(0 0 6px rgba(128,220,88,.35)) !important;
+}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div::before,
+[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div::before,
+[data-testid="stSidebar"] [data-testid="stExpander"]::before,
+[data-testid="stSidebar"] label[data-baseweb="checkbox"]::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    z-index: -1;
+    background: #fff;
+    clip-path: polygon(0 12%, 6% 12%, 4% 0, 100% 0, 96% 35%, 100% 43%, 94% 100%, 0 100%, 4% 62%, 0 54%);
+    transition: background .2s ease;
+}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div::after,
+[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div::after,
+[data-testid="stSidebar"] [data-testid="stExpander"]::after,
+[data-testid="stSidebar"] label[data-baseweb="checkbox"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: linear-gradient(105deg, #0b0b0b 0 70%, #151a15);
+    clip-path: polygon(0 12%, 6% 12%, 4% 0, 100% 0, 96% 35%, 100% 43%, 94% 100%, 0 100%, 4% 62%, 0 54%);
+    transition: background .25s ease;
+}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div:hover::before,
+[data-testid="stSidebar"] [data-testid="stExpander"]:hover::before,
+[data-testid="stSidebar"] label[data-baseweb="checkbox"]:hover::before,
+[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div:focus-within::before,
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div:focus-within::before { background: __GREEN__; }
+[data-testid="stSidebar"] label[data-baseweb="checkbox"] { padding: 9px 24px 9px 14px; }
+[data-testid="stSidebar"] label[data-baseweb="checkbox"]:has(input:checked)::before { background: __GREEN__; }
+[data-testid="stSidebar"] label[data-baseweb="checkbox"]:has(input:checked)::after {
+    background: linear-gradient(105deg, #1c3a12, #0b0b0b 68%);
+}
+
 </style>
 """
 for token, value in {"__PINK__": PINK, "__GREEN__": GREEN, "__BASE__": BASE,
@@ -792,6 +1770,7 @@ if CORNER_HEAD:
         )
 
 def clean_for_voice(text):
+    text = re.sub(r"^\s*//.*$", "", text, flags=re.M).replace("[ASK]", "")
     t = re.sub(r"[\U00010000-\U0010ffff]", "", text)
     t = re.sub(r"[\u2600-\u27bf\ufe0f\u200d]", "", t)
     t = re.sub(r"[*_`#~>]", "", t)
@@ -949,6 +1928,8 @@ if "mem_due" not in st.session_state:
     st.session_state.mem_due = False
 if "bond_level" not in st.session_state:
     st.session_state.bond_level = 50
+if "hack" not in st.session_state:
+    st.session_state.hack = {"active": False, "log": []}
 
 if BOOT_SCREEN and not st.session_state.booted:
     st.session_state.booted = True
@@ -966,9 +1947,61 @@ st.session_state.booted = True
 photo = None
 watch_on = False
 voice_on = False
+# ---------- home music: loops quietly in the browser while the app is open ----------
+_BGM_CONTROLLER = r"""
+window.capriBgm = function (want, vol, src) {
+  var D = document, el = D.getElementById('capri-bgm');
+  if (!want) { if (el) { el.pause(); el.remove(); } return; }
+  if (!el) {
+    if (!src) return;
+    el = D.createElement('audio');
+    el.id = 'capri-bgm'; el.loop = true; el.src = src;
+    D.body.appendChild(el);
+  }
+  el.volume = Math.max(0, Math.min(1, vol));
+  el.dataset.want = '1';
+  if (!window.__capriBgmBound) {
+    window.__capriBgmBound = true;
+    ['click', 'keydown', 'touchstart'].forEach(function (t) {
+      D.addEventListener(t, function () {
+        var a = D.getElementById('capri-bgm');
+        if (a && a.paused && a.dataset.want === '1') { a.play().catch(function () {}); }
+      }, true);
+    });
+  }
+  if (el.paused) { el.play().catch(function () {}); }
+};
+"""
+_BGM_MIME = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav", ".m4a": "audio/mp4"}
+
+
+def inject_home_music(on, vol):
+    """Starts/stops/re-volumes the looping home music. Returns False if no music file exists."""
+    path = next((os.path.join(HERE, "capri_home" + e) for e in _BGM_MIME
+                 if os.path.exists(os.path.join(HERE, "capri_home" + e))), None)
+    if not path:
+        return False
+    src = ""
+    if on and not st.session_state.get("bgm_sent"):       # the file is only sent once
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode()
+        src = "data:%s;base64,%s" % (_BGM_MIME[os.path.splitext(path)[1]], data)
+        st.session_state.bgm_sent = True
+    if not on:
+        st.session_state.bgm_sent = False                 # off/on again = a fresh start
+    html = ("<script>try{var P=window.parent,D=P.document;"
+            "if(!P.capriBgm){var s=D.createElement('script');s.textContent="
+            + json.dumps(_BGM_CONTROLLER) + ";D.head.appendChild(s);}"
+            "P.capriBgm(" + ("true" if on else "false") + "," + str(vol / 100.0) + ","
+            + json.dumps(src) + ");}catch(e){}</script>")
+    components.html(html, height=0)
+    return True
+
+
 voice_status_box = None
 mic_text = None
 rec = None
+diary_req = False
 
 def get_capri_mood(bond, text_history):
     last_reply = text_history[-1]["text"].lower() if text_history else ""
@@ -984,6 +2017,18 @@ def get_capri_mood(bond, text_history):
         return "✨ Chill & Bonded", "#ff3131"
 
 with st.sidebar:
+    st.markdown(
+        """
+        <div class="plate-fx"><div class="capri-side-masthead">
+            <div class="capri-bolt-badge">ϟ</div>
+            <div class="capri-side-topline"><span>NEURAL SLOT // 01</span><span class="capri-live-dot"></span><span>ONLINE</span></div>
+            <div class="capri-side-wordmark">CAPRI<span>_</span></div>
+            <div class="capri-side-subline">PERSONALITY CONSTRUCT <b>·</b> HOST LINK ACTIVE</div>
+            <div class="capri-side-rule"><i></i></div>
+        </div></div>
+        """,
+        unsafe_allow_html=True,
+    )
     user_api_key = st.text_input(
         "Gemini API Key",
         type="password",
@@ -993,15 +2038,26 @@ with st.sidebar:
 
     if avatar_card_b64:
         st.markdown(
+            '<div class="side-portrait-stage">'
+            '<div class="side-portrait-stamp">LIVE FEED <span>●</span></div>'
             '<div class="side-card"><img src="data:image/png;base64,'
-            + avatar_card_b64 + '"></div>',
+            + avatar_card_b64 + '"></div>'
+            '<div class="side-portrait-index">FIG. 01 <b>//</b> CAPRI</div>'
+            '</div>',
             unsafe_allow_html=True,
         )
-    
-    st.header("construct status")
-    current_mood, mood_color = get_capri_mood(st.session_state.bond_level, st.session_state.history)
-    st.markdown(f"**Current Mood:** <span style='color:{mood_color}; font-weight:bold;'>{current_mood}</span>", unsafe_allow_html=True)
-    st.markdown(f"**Bond Sync:** `{st.session_state.bond_level}%`")
+
+        st.header("construct status")
+        current_mood, mood_color = get_capri_mood(st.session_state.bond_level, st.session_state.history)
+        st.markdown(
+        f"""
+        <div class="plate-fx"><div class="p5-status-box">
+            <div class="p5-mood-tag" style="background:{mood_color};">{current_mood}</div>
+            <div class="p5-sync-row">NEURAL BOND SYNC // <span style="color:{PINK};">{st.session_state.bond_level}%</span></div>
+        </div></div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.progress(min(max(st.session_state.bond_level, 0), 100))
     
     if st.session_state.bond_level >= 80:
@@ -1048,6 +2104,15 @@ with st.sidebar:
 
     model = st.selectbox("model", MODELS, key="model_pick")
     sound_on = st.toggle("sound effects", value=True)
+
+    music_on = st.toggle("home music", value=True, key="music_on")
+    music_vol = 25
+    if music_on:
+        music_vol = st.slider("music volume", 0, 100, 25, key="music_vol")
+    if not inject_home_music(music_on, music_vol):
+        st.caption("put capri_home.mp3 next to capri_app.py to get music")
+    elif music_on:
+        st.caption("music starts after your first click on the page.")
 
     voice_on = st.toggle("capri's voice", key="voice_on")
     if voice_on:
@@ -1104,6 +2169,34 @@ with st.sidebar:
         else:
             st.caption("no memories recorded yet. talk to her and she'll remember key details.")
 
+    with st.expander("things she tried through you"):
+        _firsts = load_firsts()
+        if _firsts:
+            for f in reversed(_firsts[-15:]):
+                st.text("• " + f.get("what", "") + "  (" + f.get("date", "") + ")")
+        else:
+            st.caption("nothing yet. tell her about food, music, weather, places...")
+
+    with st.expander("capri's diary"):
+        if st.button("write today's entry", key="diary_btn"):
+            diary_req = True
+        _diary = load_diary()
+        if _diary:
+            for _day in sorted(_diary, reverse=True)[:7]:
+                st.markdown("**" + _day + "**")
+                st.write(_diary[_day])
+        else:
+            st.caption("she hasn't written anything yet. chat a bit, then press the button.")
+
+    chat_lines = [("you" if m["role"] == "user" else "capri") + ": " + m["text"]
+                  for m in st.session_state.history]
+    st.download_button(
+        "save chat (.txt)",
+        data="\n\n".join(chat_lines) or "(empty chat)",
+        file_name="capri_chat_" + datetime.now().strftime("%Y%m%d_%H%M") + ".txt",
+        mime="text/plain",
+    )
+
     if st.button("clear chat"):
         st.session_state.history = []
         st.session_state.greeted = False
@@ -1145,13 +2238,25 @@ if SHE_TEXTS_FIRST and not st.session_state.greeted and not st.session_state.his
     greet_box.markdown(typing_html(), unsafe_allow_html=True)
     time.sleep(1.3)
     greet_box.empty()
-    st.session_state.history.append({"role": "assistant", "text": pick_greeting()})
+    st.session_state.history.append(
+        {"role": "assistant", "text": missed_you_message() or pick_greeting()})
     st.session_state.play_blip = True
 st.session_state.greeted = True
 
 
+_FACE_RULES = [   # (picture file, words that trigger it) - checked in this order
+    ("capri_scared.png", r"\b(scared|afraid|danger|careful|hide|alarm|uh-?oh|they'?re coming|trace|run)\b"),
+    ("capri_angry.png", r"\b(angry|furious|mad|ugh|annoyed|how dare|i hate|shut up)\b"),
+    ("capri_sleepy.png", r"\b(sleepy|tired|yawn|zzz+|goodnight|good night|nap|exhausted|bed)\b"),
+]
+
+
 def get_dynamic_avatar(text):
     t = text.lower()
+    for fname, pattern in _FACE_RULES:       # new moods only show if the picture exists
+        path = os.path.join(HERE, fname)
+        if os.path.exists(path) and re.search(pattern, t):
+            return path
     if any(w in t for w in ["haha", "hehe", "lol", "😏"]):
         path = os.path.join(HERE, "capri_happy.png")
         return path if os.path.exists(path) else CAPRI_AVATAR
@@ -1161,9 +2266,20 @@ def get_dynamic_avatar(text):
     elif any(w in t for w in ["!", "oh", "wow", "omg"]):
         path = os.path.join(HERE, "capri_surprised.png")
         return path if os.path.exists(path) else CAPRI_AVATAR
-    
+
     path = os.path.join(HERE, "capri_avatar.png")
     return path if os.path.exists(path) else CAPRI_AVATAR
+
+
+FRAG_RE = re.compile(r"^\s*//\s*(.+)$", re.M)
+
+
+def split_reply(text):
+    """-> (what she says, the other voice's line or None)"""
+    t = text.replace("[ASK]", "")
+    frags = FRAG_RE.findall(t)
+    main = FRAG_RE.sub("", t).strip()
+    return (main or t.strip()), (" ".join(f.strip() for f in frags) if frags else None)
 
 
 def show_message(i, m):
@@ -1173,14 +2289,220 @@ def show_message(i, m):
                 st.image(m["image"], width=240)
             st.write(m["text"])
     else:
-        avatar_to_use = get_dynamic_avatar(m["text"])
+        main, frag = split_reply(m["text"])
+        avatar_to_use = get_dynamic_avatar(main)
         with st.container(key=f"capri_{i}"):
             with st.chat_message("assistant", avatar=avatar_to_use):
-                st.write(m["text"])
+                st.write(main)
+                if frag:
+                    st.caption("// " + frag)
 
 
 for i, m in enumerate(st.session_state.history):
     show_message(i, m)
+
+# she asked permission for something dangerous -> answer with a tap
+_hist = st.session_state.history
+if (_hist and _hist[-1]["role"] == "assistant" and "[ASK]" in _hist[-1]["text"]
+        and not st.session_state.get("quick_reply")):
+    _c1, _c2, _c3 = st.columns(3)
+    if _c1.button("yes, go for it", key="ask_yes"):
+        st.session_state.quick_reply = "(yes, go for it)"
+        st.rerun()
+    if _c2.button("no, wait!", key="ask_no"):
+        st.session_state.quick_reply = "(no, wait! don't)"
+        st.rerun()
+    if _c3.button("surprise me", key="ask_any"):
+        st.session_state.quick_reply = "(do whatever you want, surprise me)"
+        st.rerun()
+
+
+HACK_TARGETS = [
+    "the megacorp vault under the noodle district",
+    "every traffic light on the main strip",
+    "a rooftop billboard network",
+    "the vending machine empire",
+    "the city's neon sign grid",
+]
+HACK_MAX_TURNS = 15
+
+
+def run_hack(cmd):
+    h = st.session_state.hack
+    prompt = (
+        "You are Capri, a chaotic, playful digital construct, narrating a tiny pretend text game "
+        "where your host 'hacks' a fictional target. It is pure fiction: never give real hacking "
+        "steps, tools or code. Target: %s. Breach progress: %d/100. Alert level: %d/100. "
+        "Turn %d of %d.\nRecent log:\n%s\n\nThe host typed this command: \"%s\"\n\n"
+        "Narrate what happens in one or two short sentences in your own voice (texting style, "
+        "a little weird, no asterisks). Smart or creative commands raise progress; reckless or "
+        "silly ones raise the alert. Return ONLY JSON like "
+        "{\"narration\": \"...\", \"progress_delta\": 15, \"alert_delta\": 5} with progress_delta "
+        "from -10 to 30 and alert_delta from 0 to 35."
+        % (h["target"], h["progress"], h["alert"], h["turns"] + 1, HACK_MAX_TURNS,
+           "\n".join(h["log"][-6:]), cmd.replace('"', "'"))
+    )
+    reply = client.models.generate_content(
+        model=st.session_state.get("model_pick", MODELS[0]),
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            max_output_tokens=300, response_mime_type="application/json"),
+    )
+    data = json.loads(reply.text or "{}")
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        dp = max(-10, min(30, int(data.get("progress_delta", 8))))
+        da = max(0, min(35, int(data.get("alert_delta", 5))))
+    except Exception:
+        dp, da = 8, 5
+    h["progress"] = max(0, min(100, h["progress"] + dp))
+    h["alert"] = max(0, min(100, h["alert"] + da))
+    h["turns"] += 1
+    h["log"].append("> " + cmd)
+    h["log"].append("capri: " + str(data.get("narration", "...static...")).strip()[:300])
+    if h["progress"] >= 100:
+        h["active"] = False
+        h["log"].append("> BREACH COMPLETE. capri: we did it!! hehe")
+        st.session_state.bond_level = min(100, st.session_state.bond_level + 5)
+    elif h["alert"] >= 100 or h["turns"] >= HACK_MAX_TURNS:
+        h["active"] = False
+        h["log"].append("> TRACE COMPLETE. capri: run run run, they found us!")
+
+
+HACK_CSS = """
+<style>
+.hk{position:relative;background:#020202;border:3px solid __GREEN__;box-shadow:0 0 18px __GREEN__55, inset 0 0 40px #000;font-family:Consolas,"Courier New",monospace;color:#d8ffd0;padding:0 0 12px;overflow:hidden;margin-bottom:10px}
+.hk.hot{border-color:__PINK__;box-shadow:0 0 22px __PINK__99, inset 0 0 40px #000;animation:hkpulse .9s infinite}
+.hk::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px)}
+.hk-top{display:flex;justify-content:space-between;align-items:center;background:__GREEN__;color:#000;font-weight:900;padding:4px 10px;font-size:.8rem;letter-spacing:.12em}
+.hk.hot .hk-top{background:__PINK__}
+.hk-live::before{content:"●";margin-right:6px;animation:hkblink 1s steps(2) infinite}
+.hk-title{display:inline-block;margin:12px 12px 6px;padding:4px 16px;border:4px double __GREEN__;color:__GREEN__;text-shadow:2px 0 __PINK__,-2px 0 #50b4ff;font-size:.9rem;font-weight:900;letter-spacing:.12em;white-space:nowrap}
+.hk.hot .hk-title{border-color:__PINK__;color:__PINK__;text-shadow:2px 0 __GREEN__,-2px 0 #50b4ff}
+.hk-target{padding:2px 12px 8px;color:#9fe8ff;font-size:.85rem}
+.hk-meters{padding:0 12px}
+.hk-m{margin:5px 0}
+.hk-lab{display:flex;justify-content:space-between;font-size:.72rem;letter-spacing:.14em;font-weight:900}
+.hk-bar{position:relative;height:14px;background:#0b0b0b;border:1px solid #333}
+.hk-fill{height:100%;transition:width .6s}
+.hk-g{background:linear-gradient(90deg,#2d7a1a,__GREEN__);box-shadow:0 0 10px __GREEN__}
+.hk-r{background:linear-gradient(90deg,#8a0f0f,__PINK__);box-shadow:0 0 10px __PINK__}
+.hk-bar::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 9px,#000 9px 11px)}
+.hk-warn{color:__PINK__;text-align:center;font-weight:900;letter-spacing:.2em;font-size:.8rem;margin:8px 0 0;animation:hkblink .6s steps(2) infinite}
+.hk-log{margin:10px 12px 0;padding:8px 10px;background:#000;border:1px solid #1f3a1a}
+.hk-line{margin:3px 0;font-size:.88rem;line-height:1.35;word-break:break-word}
+.hk-cmd{color:#50b4ff}
+.hk-prompt{color:__GREEN__;margin-right:6px}
+.hk-capri{color:#fff}
+.hk-tag{background:__PINK__;color:#000;font-weight:900;font-size:.7rem;padding:0 5px;margin-right:6px}
+.hk-sys{color:__GREEN__;text-shadow:0 0 6px __GREEN__}
+.hk-bad{color:__PINK__;text-shadow:0 0 6px __PINK__}
+.hk-dim{color:#777}
+.hk-new{animation:hkin .5s ease-out}
+.hk-cur::after{content:"█";color:__GREEN__;animation:hkblink 1s steps(2) infinite}
+.hk-banner{margin:10px 12px 0;padding:8px;text-align:center;font-weight:900;letter-spacing:.25em;font-size:1.05rem;color:#000}
+.hk-win{background:__GREEN__;animation:hkglitch .25s 3}
+.hk-lose{background:__PINK__;animation:hkshake .4s 3}
+@keyframes hkblink{50%{opacity:0}}
+@keyframes hkpulse{50%{box-shadow:0 0 6px __PINK__55, inset 0 0 40px #000}}
+@keyframes hkin{from{opacity:0;transform:translateX(-10px);filter:blur(2px)}to{opacity:1;transform:none;filter:none}}
+@keyframes hkshake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+@keyframes hkglitch{33%{transform:translateX(4px);text-shadow:-3px 0 #50b4ff}66%{transform:translateX(-4px);text-shadow:3px 0 __PINK__}}
+</style>
+"""
+HACK_CSS = "".join(l.strip() for l in HACK_CSS.splitlines()).replace("__GREEN__", GREEN).replace("__PINK__", PINK)
+
+HACK_TITLE = ("╔═══════════════════════════════╗\n"
+              "║  C A P R I  //  B R E A C H   ║\n"
+              "╚═══════════════════════════════╝")
+
+
+def hack_panel_html(h):
+    e = htmllib.escape
+    log = h.get("log", [])
+    active = bool(h.get("active"))
+    prog, alert = int(h.get("progress", 0)), int(h.get("alert", 0))
+    last = log[-1] if log else ""
+    hot = active and alert >= 70
+    right = ("TURN %d/%d" % (h.get("turns", 0), HACK_MAX_TURNS)) if active else ""
+    out = ['<div class="hk%s">' % (" hot" if hot else ""),
+           '<div class="hk-top"><span class="hk-live">%s</span><span>%s</span></div>'
+           % ("LIVE" if active else ("BREACHED" if last.startswith("> BREACH")
+                                     else "TRACED" if last.startswith("> TRACE") else "STANDBY"), right),
+           '<div class="hk-title">C A P R I &nbsp;//&nbsp; B R E A C H</div>']
+    if h.get("target"):
+        out.append('<div class="hk-target">TARGET &gt; %s</div>' % e(h["target"]))
+    if active or h.get("target"):
+        out.append('<div class="hk-meters">'
+                   '<div class="hk-m"><div class="hk-lab"><span>BREACH</span><span>%d%%</span></div>'
+                   '<div class="hk-bar"><div class="hk-fill hk-g" style="width:%d%%"></div></div></div>'
+                   '<div class="hk-m"><div class="hk-lab"><span>ALERT</span><span>%d%%</span></div>'
+                   '<div class="hk-bar"><div class="hk-fill hk-r" style="width:%d%%"></div></div></div>'
+                   '</div>' % (prog, prog, alert, alert))
+    if hot:
+        out.append('<div class="hk-warn">⚠ TRACE CLOSING IN ⚠</div>')
+    if log:
+        rows = []
+        shown = log[-10:]
+        for idx, line in enumerate(shown):
+            new = " hk-new" if idx >= len(shown) - 2 else ""
+            t = e(line)
+            if line.startswith("capri:"):
+                rows.append('<div class="hk-line hk-capri%s"><span class="hk-tag">CAPRI</span>%s</div>'
+                            % (new, t[6:].strip()))
+            elif line.startswith("> TRACE"):
+                rows.append('<div class="hk-line hk-bad%s">%s</div>' % (new, t))
+            elif line.startswith("> BREACH") or line.startswith("> target"):
+                rows.append('<div class="hk-line hk-sys%s">%s</div>' % (new, t))
+            elif line.startswith("> you pulled"):
+                rows.append('<div class="hk-line hk-dim">%s</div>' % t)
+            elif line.startswith("> "):
+                rows.append('<div class="hk-line hk-cmd%s"><span class="hk-prompt">&gt;</span>%s</div>'
+                            % (new, e(line[2:])))
+            else:
+                rows.append('<div class="hk-line">%s</div>' % t)
+        if active:
+            rows.append('<div class="hk-line hk-cur"></div>')
+        out.append('<div class="hk-log">%s</div>' % "".join(rows))
+    if last.startswith("> BREACH"):
+        out.append('<div class="hk-banner hk-win">ACCESS GRANTED</div>')
+    elif last.startswith("> TRACE"):
+        out.append('<div class="hk-banner hk-lose">CONNECTION LOST</div>')
+    out.append("</div>")
+    return HACK_CSS + "".join(out)
+
+
+with st.expander("hack the mainframe (mini game)"):
+    _h = st.session_state.hack
+    st.markdown(hack_panel_html(_h), unsafe_allow_html=True)
+    if _h["active"]:
+        with st.form("hack_form", clear_on_submit=True):
+            _cmd = st.text_input("command", placeholder="scan, ping the guards, sneak in, ...")
+            _go = st.form_submit_button("run")
+        if _go and _cmd.strip():
+            with st.spinner("capri is typing..."):
+                try:
+                    run_hack(_cmd.strip()[:80])
+                except Exception as e:
+                    st.warning("static on the line (" + str(e)[:80] + "), try again")
+                else:
+                    st.session_state.play_blip = True
+                    st.rerun()
+        if st.button("give up", key="hack_quit"):
+            st.session_state.hack = {"active": False, "log": _h["log"] + ["> you pulled the plug."]}
+            st.rerun()
+    else:
+        st.caption("type commands and she narrates what happens. win by breaching "
+                   "before the alert fills up. winning gives a little bond boost.")
+        if st.button("start a new hack", key="hack_start"):
+            _target = random.choice(HACK_TARGETS)
+            st.session_state.hack = {
+                "active": True, "target": _target, "progress": 0, "alert": 0, "turns": 0,
+                "log": ["> target locked: " + _target,
+                        "capri: i'm in your head. type commands and i'll narrate. try 'scan'!"],
+            }
+            st.rerun()
 
 
 def build_contents():
@@ -1206,12 +2528,15 @@ def build_contents():
 user = st.chat_input("say something to capri...")
 if not user and mic_text:
     user = mic_text
+if not user and st.session_state.get("quick_reply"):
+    user = st.session_state.pop("quick_reply")
 if user:
     entry = {"role": "user", "text": user}
     if photo is not None:
         entry["image"] = photo.getvalue()
         entry["mime"] = photo.type or "image/jpeg"
     st.session_state.history.append(entry)
+    save_last_seen(time.time())
 
     show_message(len(st.session_state.history) - 1, entry)
 
@@ -1268,6 +2593,43 @@ if st.session_state.mem_due:
         update_memories(batch)
     except Exception:
         pass        # memory is a bonus, never break the chat for it
+
+
+def write_diary():
+    hist = list(st.session_state.history)[-30:]
+    convo = "\n".join(
+        ("host: " if m["role"] == "user" else "you: ") + split_reply(m["text"])[0]
+        for m in hist)
+    reply = client.models.generate_content(
+        model=st.session_state.get("model_pick", MODELS[0]),
+        contents=("Write today's diary entry as Capri, in first person: 3 to 5 short sentences, "
+                  "texting style, chaotic and a little weird. No headers, no lines starting with //, "
+                  "no [ASK] tag, no asterisks. Write about what you and your host did or talked "
+                  "about and how you felt. Today's chat:\n" + convo),
+        config=types.GenerateContentConfig(
+            system_instruction=get_full_persona(), max_output_tokens=500),
+    )
+    text = split_reply(reply.text or "")[0].strip()
+    if text:
+        d = load_diary()
+        d[datetime.now().strftime("%Y-%m-%d")] = text
+        _write_json(DIARY_FILE, d)
+        return True
+    return False
+
+
+if diary_req:
+    if not st.session_state.history:
+        st.toast("talk to her first, then she has something to write about")
+    else:
+        _ok = False
+        with st.spinner("she's writing..."):
+            try:
+                _ok = write_diary()
+            except Exception as e:
+                st.warning("couldn't write it (" + str(e)[:80] + "), try again")
+        if _ok:
+            st.rerun()
 
 
 def watch_contents(jpeg_bytes):
