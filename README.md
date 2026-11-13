@@ -2,13 +2,9 @@
 
 ### Setup Instructions
 
-1. Open a command terminal in this folder.
-2. Create and activate a virtual environment:
-   ```cmd
-   python -m venv venv
-   venv\Scripts\activate
- 
+1. Open a command terminal from address bar and type CMD then enter
 
+then do the instalation:
 1.
 Install the required packages:
 pip install -r requirements.txt
@@ -31,7 +27,7 @@ Generate a free Gemini API key.
 
 Copy the key to the clipboard.
 
-Launch Capri in their browser.
+make sure already Launch Capri in the browser.
 
 Paste the key directly into the Gemini API Key box in the sidebar.
 
