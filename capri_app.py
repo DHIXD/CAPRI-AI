@@ -163,10 +163,47 @@ Rules: always stay in character. Never say you are an AI model. Never copy
 lines from the show, speak in your own words.
 """
 
+MEM_EVERY = 4     # she updates her notebook after this many of your messages
+MEM_MAX = 30      # most facts she keeps
+
+
 def get_full_persona():
     mems = load_memories()
     mem_str = "\n".join([f"- {m}" for m in mems]) if mems else "None yet."
-    return base_persona + f"\n\nThings you remember about your host:\n{mem_str}"
+    return (base_persona
+            + "\n\nThings you remember about your host (use them naturally when they fit, "
+              "like a close friend would. Never list them out, and never mention a notebook "
+              "or memory file):\n" + mem_str)
+
+
+def update_memories(batch):
+    """Asks gemini to turn your latest messages into short lasting facts."""
+    mems = load_memories()
+    prompt = (
+        "You keep a short private notebook of lasting facts about a person (the host) "
+        "for their companion character.\n\n"
+        "Current notebook:\n" + (json.dumps(mems, ensure_ascii=False) if mems else "[]") + "\n\n"
+        "Their latest messages:\n" + "\n".join("- " + b for b in batch) + "\n\n"
+        "Return the updated notebook as a JSON array of short strings "
+        "(max 120 characters each, at most %d items). Keep only lasting facts: name or nickname, "
+        "likes and dislikes, hobbies, things they are working on or planning, people and pets they "
+        "mention, running jokes, how they like to be talked to. Remove entries that are only chat "
+        "fragments or small talk, merge duplicates, and update facts that changed. "
+        "Never store passwords, ID or card numbers, addresses, or private health details. "
+        "Write each fact in third person, like 'host likes spicy ramen'. "
+        "Output only the JSON array." % MEM_MAX
+    )
+    reply = client.models.generate_content(
+        model=st.session_state.get("model_pick", MODELS[0]),
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            max_output_tokens=800, response_mime_type="application/json"),
+    )
+    data = json.loads(reply.text or "[]")
+    if isinstance(data, list):
+        clean = [str(x).strip()[:120] for x in data if str(x).strip()]
+        if clean:                      # never wipe the notebook with an empty answer
+            save_memories(clean[:MEM_MAX])
 
 WATCH_NOTE = """
 
@@ -780,6 +817,82 @@ except Exception:
     HAVE_EDGE = False
 
 
+# ---------- your voice -> text (speech to text, done by gemini) ----------
+def transcribe(audio_bytes):
+    """Turns a recording of you talking into text. Returns '' if it fails."""
+    try:
+        reply = client.models.generate_content(
+            model=MODELS[0],
+            contents=[
+                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+                "Transcribe this speech exactly as spoken, in the language spoken. "
+                "Output only the words, nothing else. If there is no speech, output nothing.",
+            ],
+        )
+        return (reply.text or "").strip()
+    except Exception as e:
+        st.warning("couldn't hear that (" + str(e)[:80] + "), try again")
+        return ""
+
+
+def speak_edge(text):
+    if not HAVE_EDGE:
+        st.error("voice needs: py -m pip install edge-tts")
+        return
+    async def _generate():
+        # en-US-AriaNeural suaranya dewasa, alami, dan enerjik
+        voice = st.session_state.get("edge_voice", "en-US-JennyNeural")
+        rate = "%+d%%" % st.session_state.get("edge_rate", 10)
+        pitch = "%+dHz" % st.session_state.get("edge_pitch", 5)
+        communicate = edge_tts.Communicate(clean_for_voice(text), voice,
+                                           rate=rate, pitch=pitch)
+        audio_data = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_data += chunk["data"]
+        return audio_data
+
+    try:
+        audio_bytes = asyncio.run(_generate())
+        st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+    except Exception as e:
+        st.error(f"Voice error: {e}")
+
+# ---------- capri's cloned voice (runs on YOUR computer, unlimited, no quota) ----------
+REF_VOICE_FILE = os.path.join(HERE, "capri_ref.wav")   # 10-30s clean clip of the voice
+
+
+@st.cache_resource(show_spinner="loading capri's voice model (first time downloads ~2GB)...")
+def load_xtts():
+    import torch
+    from TTS.api import TTS
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
+
+
+def speak_clone(text):
+    if not os.path.exists(REF_VOICE_FILE):
+        st.error("put capri_ref.wav next to capri_app.py")
+        return False
+    try:
+        model = load_xtts()
+        samples = model.tts(text=clean_for_voice(text), speaker_wav=REF_VOICE_FILE,
+                            language="en")
+        pcm = (np.clip(np.array(samples), -1, 1) * 32767).astype(np.int16).tobytes()
+        st.audio(pcm_to_wav(pcm, 24000), format="audio/wav", autoplay=True)
+        return True
+    except Exception as e:
+        st.error("cloned voice failed (" + str(e)[:120] + "), using the preset voice")
+        return False
+
+
+def speak_voice(text):
+    if st.session_state.get("voice_engine", "").startswith("capri clone"):
+        if speak_clone(text):
+            return
+    speak_edge(text)
+
+
 def boot_overlay_html():
     lines = "".join(
         '<div class="boot-line bl%d">%s</div>' % (i, htmllib.escape(line))
@@ -830,6 +943,10 @@ if "play_blip" not in st.session_state:
     st.session_state.play_blip = False
 if "mic_key" not in st.session_state:
     st.session_state.mic_key = 0
+if "mem_pending" not in st.session_state:
+    st.session_state.mem_pending = []
+if "mem_due" not in st.session_state:
+    st.session_state.mem_due = False
 if "bond_level" not in st.session_state:
     st.session_state.bond_level = 50
 
@@ -851,6 +968,7 @@ watch_on = False
 voice_on = False
 voice_status_box = None
 mic_text = None
+rec = None
 
 def get_capri_mood(bond, text_history):
     last_reply = text_history[-1]["text"].lower() if text_history else ""
@@ -948,10 +1066,6 @@ with st.sidebar:
         if hasattr(st, "audio_input"):
             rec = st.audio_input("press the mic, talk, then press stop",
                                  key="mic_" + str(st.session_state.mic_key))
-            if rec is not None:
-                with st.spinner("listening..."):
-                    # We need client initialized first, will handle below or use user_api_key check
-                    pass
             st.caption("your voice clip is sent to google to be turned into text.")
         else:
             st.warning("mic needs a newer streamlit: py -m pip install -U streamlit")
@@ -1011,9 +1125,10 @@ client = genai.Client(api_key=user_api_key, http_options=types.HttpOptions(timeo
 tts_client = genai.Client(api_key=user_api_key, http_options=types.HttpOptions(api_version="v1beta", timeout=60000))
 
 # Handle microphone transcription if recording exists
-if mic_on and hasattr(st, "audio_input"):
-    # Re-check rec capture if needed
-    pass
+if mic_on and rec is not None:
+    with st.spinner("listening..."):
+        mic_text = transcribe(rec.getvalue())
+    st.session_state.mic_key += 1   # fresh recorder, so this clip is never re-sent
 
 st.markdown(
     '<div class="capri-title">'
@@ -1113,13 +1228,10 @@ if user:
         )
         text = reply.text or "(she sent nothing, try again)"
         
-        if len(user) > 15:
-            mems = load_memories()
-            if len(user.split()) > 3 and user not in mems:
-                mems.append(user)
-                if mems and len(mems) > 10:
-                    mems.pop(0)
-                save_memories(mems)
+        if len(user.split()) >= 3:
+            st.session_state.mem_pending.append(user)
+            if len(st.session_state.mem_pending) >= MEM_EVERY:
+                st.session_state.mem_due = True
 
     except Exception as e:
         typing_box.empty()
@@ -1141,13 +1253,21 @@ speak_text = st.session_state.pop("speak_text", None)
 if st.session_state.play_blip:
     st.session_state.play_blip = False
     if voice_on and speak_text:
-        # Voice implementation handlers
-        pass
+        speak_voice(speak_text)
     elif sound_on:
         try:
             st.audio(make_blip(), format="audio/wav", autoplay=True)
         except Exception:
             pass
+
+if st.session_state.mem_due:
+    st.session_state.mem_due = False
+    batch = st.session_state.mem_pending[-MEM_EVERY * 2:]
+    st.session_state.mem_pending = []
+    try:
+        update_memories(batch)
+    except Exception:
+        pass        # memory is a bonus, never break the chat for it
 
 
 def watch_contents(jpeg_bytes):
