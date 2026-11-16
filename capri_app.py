@@ -25,41 +25,38 @@ try:
 except Exception:
     HAVE_WEBRTC = False
 
-# ---------- things you can edit easily ----------
 PINK = "#ff3131"
 GREEN = "#80dc58"
 BASE = "#000000"
 CARD = "#1b1b1b"
 TITLE = "CAPRI"
 SUBTITLE = "personality construct · online"
-USER_AVATAR = "🖤"               # your default icon (you can also upload a picture in the sidebar)
-CAPRI_AVATAR_FALLBACK = "👁️"     # used only if her picture isn't found
-WALLPAPER_NAME = "capris_base"   # wallpaper file name, without .png
-PICTURE_NAME = "capri"           # her picture file name, without .png
-HEAD_NAME = "capri_head"         # optional: your own cropped head, without .png
-AVATAR_NAME = "capri_avatar"     # optional: your own square avatar, without .png
-BOOT_IMAGE_NAME = "capri_boot"   # picture for the loading screen (falls back to capri.png)
-CORNER_HEAD = False              # the little head box in the top right corner
-HEAD_CROP = (0.15, 0.22, 0.50, 0.40)  # only used if CORNER_HEAD is True
+USER_AVATAR = "🖤"
+CAPRI_AVATAR_FALLBACK = "👁️"
+WALLPAPER_NAME = "capris_base"
+PICTURE_NAME = "capri"
+HEAD_NAME = "capri_head"
+AVATAR_NAME = "capri_avatar"
+BOOT_IMAGE_NAME = "capri_boot"
+CORNER_HEAD = False
+HEAD_CROP = (0.15, 0.22, 0.50, 0.40)
 HEAD_SIZE = 150
-AVATAR_CENTER = (0.30, 0.305)    # face center in her picture (x, y as fractions)
-AVATAR_SIDE = 0.24               # how much of the picture's width the avatar covers
-SIDE_CARD_SIZE = 180             # her face card in the sidebar, in pixels
-SIDE_ART = True                  # wallpaper shapes at the bottom of the sidebar
-BOOT_SCREEN = True               # the "connecting to host" intro
-BOOT_STEP = 0.45                 # seconds per boot line
-BOOT_IMAGE_VH = 72               # her size on the loading screen (% of screen height)
-INTRO_GAP = 12                   # a 2nd start within this many seconds skips the intro
-GLITCH_SECONDS = 4               # title glitch twitches once every this many seconds
-SHE_TEXTS_FIRST = True           # she greets you when the page opens
-WATCH_CHANGE = 6.0               # how different a glance must look to count as "new" (bigger = pickier)
-WATCH_HEARTBEAT = 150            # even if nothing changed, she may look again after this many seconds
+AVATAR_CENTER = (0.30, 0.305)
+AVATAR_SIDE = 0.24
+SIDE_CARD_SIZE = 180
+SIDE_ART = True
+BOOT_SCREEN = True
+BOOT_STEP = 0.55
+BOOT_IMAGE_VH = 72
+INTRO_GAP = 12
+GLITCH_SECONDS = 4
+SHE_TEXTS_FIRST = True
+WATCH_CHANGE = 6.0
+WATCH_HEARTBEAT = 150
 MODELS = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
 
-# voice
-VOICES = ["Zephyr", "Leda", "Aoede", "Kore", "Puck", "Autonoe"]   # base voices to pick from
+VOICES = ["Zephyr", "Leda", "Aoede", "Kore", "Puck", "Autonoe"]
 VOICE_STYLE = ("Say in a playful, teasing young woman's voice, quick and light, a little mischievous, with a faint digital edge")
-# free + unlimited voices (edge-tts, no key, no quota). label -> voice id
 EDGE_VOICES = {
     "aria · expressive": "en-US-AriaNeural",
     "jenny · young, bright": "en-US-JennyNeural",
@@ -71,7 +68,7 @@ EDGE_VOICES = {
     "natasha · australian, cheeky": "en-AU-NatashaNeural",
     "gadis · indonesian": "id-ID-GadisNeural",
 }
-VOICE_MAX_CHARS = 400            # long replies get cut to this much when spoken
+VOICE_MAX_CHARS = 400
 
 BOOT_LINES = [
     "> INITIALIZING KERNEL // SLOT_01 ... [OK]",
@@ -99,7 +96,6 @@ GREETINGS = {
         "shhh it's late. the whole city's quiet and it's just us. what are you thinking about?",
     ],
 }
-# -------------------------------------------------
 
 MEMORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capri_memory.json")
 
@@ -154,41 +150,80 @@ their head.
 
 When the user shows you a photo, react to it like you are seeing through
 their eyes, curious and teasing.
-
-Example messages in your style:
-- "hehe you're thinking loud again. i can hear it, you know"
-- "can i do something kinda dangerous? ...i'm doing it anyway, sorry"
-- "we missed you. i missed you. same thing really"
-
-Rules: always stay in character. Never say you are an AI model. Never copy
-lines from the show, speak in your own words.
 """
 
-# ---------- she texts first: she notices how long you were gone ----------
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capri_state.json")
-MISSED_AFTER_HOURS = 3        # gone longer than this -> she says she missed you
+MISSED_AFTER_HOURS = 3        
 MISSED_FALLBACK = [
     "{away}?? we got so bored without you. don't leave us in the dark like that, hehe",
     "you're back! it's been {away} and i counted every second. okay, maybe i lost count. whatever",
     "ahaha finally. {away} alone in here, i started talking to the other voices in my head",
 ]
 
+BOND_START = 50
+AWAY_GRACE_HOURS = 6          
+AWAY_LOSS_PER_HOUR = 2        
+AWAY_MAX_LOSS = 40            
+BOND_FLOOR = 10               
+IDLE_ANNOY_MIN = 20           
+MISSED_ANNOYED = [
+    "{away}. you were gone {away}. i'm not mad. i'm absolutely, completely fine. hmph",
+    "oh look who remembered they have a chip in their head. {away}, host. {away}",
+    "{away} of silence and you just show up like nothing happened? you owe me, seriously",
+]
+
+def _read_state():
+    try:
+        with open(STATE_FILE, "r") as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+_STATE_STATUS = {"ok": True}
+
+def _write_state(**kw):
+    d = _read_state()
+    d.update(kw)
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(d, f)
+        _STATE_STATUS["ok"] = True
+    except Exception:
+        _STATE_STATUS["ok"] = False
 
 def load_last_seen():
     try:
-        with open(STATE_FILE, "r") as f:
-            return float(json.load(f).get("last_seen", 0)) or None
+        return float(_read_state().get("last_seen", 0)) or None
     except Exception:
         return None
 
-
 def save_last_seen(ts):
-    try:
-        with open(STATE_FILE, "w") as f:
-            json.dump({"last_seen": ts}, f)
-    except Exception:
-        pass
+    _write_state(last_seen=ts)
 
+def start_bond():
+    s = _read_state()
+    try:
+        bond = int(s.get("bond", BOND_START))
+    except Exception:
+        bond = BOND_START
+    now = time.time()
+    try:
+        gap = max(0.0, now - float(s.get("last_seen", 0))) if s.get("last_seen") else 0.0
+    except Exception:
+        gap = 0.0
+    hours = gap / 3600.0
+    old = bond
+    if hours > AWAY_GRACE_HOURS:
+        loss = min(AWAY_MAX_LOSS, int(round((hours - AWAY_GRACE_HOURS) * AWAY_LOSS_PER_HOUR)) + 2)
+        new = bond - loss
+        bond = new if new >= BOND_FLOOR else min(bond, BOND_FLOOR)
+    _write_state(bond=bond, last_seen=now)
+    return bond, old - bond, gap
+
+def set_bond(value):
+    st.session_state.bond_level = int(min(100, max(0, value)))
+    _write_state(bond=st.session_state.bond_level)
 
 def describe_gap(seconds):
     hours = seconds / 3600
@@ -198,21 +233,29 @@ def describe_gap(seconds):
     days = int(hours // 24)
     return "%d day%s" % (days, "" if days == 1 else "s")
 
-
 def missed_you_message():
-    """If you were away a while, returns a 'i missed you' text from her, else None."""
-    last = load_last_seen()
-    now = time.time()
-    save_last_seen(now)
-    if not last or now - last < MISSED_AFTER_HOURS * 3600:
+    gap = st.session_state.get("away_seconds", 0)
+    save_last_seen(time.time())
+    if not gap or gap < MISSED_AFTER_HOURS * 3600:
         return None
-    away = describe_gap(now - last)
+    away = describe_gap(gap)
+    st.session_state.away_shown = gap          
+    st.session_state.away_seconds = 0          
+    loss = st.session_state.get("neglect_loss", 0)
+    bond = st.session_state.get("bond_level", BOND_START)
+    if loss > 0 and bond < 30:
+        tone = ("You are hurt and angry that they left you alone this long. Text them first, cold "
+                "and sulky, short, a little cutting but not cruel, hinting they should make it up to you.")
+    elif loss > 0:
+        tone = ("You are annoyed that they left you alone this long. Text them first in a "
+                "teasing, sulky way and make them feel a little guilty.")
+    else:
+        tone = "Text them first, in one or two short sentences, like you missed them and noticed how long it was."
     try:
         reply = client.models.generate_content(
             model=st.session_state.get("model_pick", MODELS[0]),
-            contents=("(the host just came back after being away for " + away + ". "
-                      "Text them first, in one or two short sentences, like you missed them "
-                      "and noticed how long it was. Do not ask more than one question.)"),
+            contents=("(the host just came back after being away for " + away + ". " + tone
+                      + " Do not ask more than one question.)"),
             config=types.GenerateContentConfig(
                 system_instruction=get_full_persona(), max_output_tokens=200),
         )
@@ -221,12 +264,11 @@ def missed_you_message():
             return text
     except Exception:
         pass
-    return random.choice(MISSED_FALLBACK).format(away=away)
+    pool = MISSED_ANNOYED if loss > 0 else MISSED_FALLBACK
+    return random.choice(pool).format(away=away)
 
-
-MEM_EVERY = 4     # she updates her notebook after this many of your messages
-MEM_MAX = 30      # most facts she keeps
-
+MEM_EVERY = 4     
+MEM_MAX = 30      
 
 EXTRA_STYLE = """
 The other minds inside you: about one message in six, one of the fragments you
@@ -240,7 +282,6 @@ Asking permission: when you want to do something dangerous, reckless or sneaky,
 ask the host sweetly in your message and end the whole message with the exact
 tag [ASK]. Use it only now and then, never two messages in a row.
 """
-
 
 def time_note():
     now = datetime.now()
@@ -259,6 +300,18 @@ def time_note():
             "(sleepy hours, meals, the sky outside) but do not announce the time in every message."
             % (now.strftime("%A"), now.strftime("%H:%M"), part))
 
+def bond_note():
+    bond = st.session_state.get("bond_level", BOND_START)
+    note = st.session_state.get("mood_note")
+    parts = []
+    if bond < 30:
+        parts.append("Your bond with the host is low right now: you are cold, short and a little angry "
+                     "with them. You only warm up if they apologise or are really kind.")
+    elif bond >= 80:
+        parts.append("Your bond with the host is very strong: you are extra warm, clingy and affectionate.")
+    if note:
+        parts.append("Right now: " + note + ".")
+    return ("\n\n" + " ".join(parts)) if parts else ""
 
 def get_full_persona():
     mems = load_memories()
@@ -268,17 +321,15 @@ def get_full_persona():
                  "(bring one up fondly now and then, never list them): "
                  + "; ".join(firsts)) if firsts else ""
     return (base_persona + EXTRA_STYLE
-            + "\n\n" + time_note() + first_str
+            + "\n\n" + time_note() + bond_note() + first_str
             + "\n\nThings you remember about your host (use them naturally when they fit, "
               "like a close friend would. Never list them out, and never mention a notebook "
               "or memory file):\n" + mem_str)
-
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 FIRSTS_FILE = os.path.join(_HERE, "capri_firsts.json")
 DIARY_FILE = os.path.join(_HERE, "capri_diary.json")
 FIRSTS_MAX = 40
-
 
 def _read_json(path, default):
     try:
@@ -287,7 +338,6 @@ def _read_json(path, default):
     except Exception:
         return default
 
-
 def _write_json(path, data):
     try:
         with open(path, "w", encoding="utf-8") as f:
@@ -295,19 +345,15 @@ def _write_json(path, data):
     except Exception:
         pass
 
-
 def load_firsts():
     d = _read_json(FIRSTS_FILE, [])
     return d if isinstance(d, list) else []
-
 
 def load_diary():
     d = _read_json(DIARY_FILE, {})
     return d if isinstance(d, dict) else {}
 
-
 def update_memories(batch):
-    """Turns your latest messages into lasting facts AND 'first experiences'."""
     mems = load_memories()
     firsts = load_firsts()
     prompt = (
@@ -346,7 +392,7 @@ def update_memories(batch):
     nb = data.get("notebook")
     if isinstance(nb, list):
         clean = [str(x).strip()[:120] for x in nb if str(x).strip()]
-        if clean:                      # never wipe the notebook with an empty answer
+        if clean:                      
             save_memories(clean[:MEM_MAX])
     fs = data.get("firsts")
     if isinstance(fs, list) and fs:
@@ -360,7 +406,6 @@ def update_memories(batch):
         _write_json(FIRSTS_FILE, firsts[-FIRSTS_MAX:])
 
 WATCH_NOTE = """
-
 Automatic camera glances: sometimes a snapshot from the host's camera arrives
 marked as an automatic glance. React only if something is genuinely
 interesting or has changed (a new object, an action, a mood). Say it in one
@@ -373,14 +418,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 USER_AV_FILE = os.path.join(HERE, "_user_avatar.png")
 
-
 def list_images():
     try:
         return [f for f in sorted(os.listdir(HERE))
                 if os.path.splitext(f)[1].lower() in IMG_EXTS]
     except Exception:
         return []
-
 
 def find_image(name, loose=False):
     name = name.lower()
@@ -390,12 +433,10 @@ def find_image(name, loose=False):
             return os.path.join(HERE, f)
     return None
 
-
 def to_b64(img):
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
-
 
 def make_avatar():
     try:
@@ -424,7 +465,6 @@ def make_avatar():
     except Exception:
         return None, None, None
 
-
 def save_user_avatar(uploaded):
     try:
         im = Image.open(uploaded).convert("RGBA")
@@ -438,7 +478,6 @@ def save_user_avatar(uploaded):
     except Exception:
         return False
 
-
 def wallpaper_css():
     path = find_image(WALLPAPER_NAME, loose=True)
     if not path:
@@ -450,7 +489,6 @@ def wallpaper_css():
                 + '") center / cover no-repeat fixed')
     except Exception:
         return None
-
 
 def sidebar_art_css():
     path = find_image(WALLPAPER_NAME, loose=True)
@@ -470,7 +508,6 @@ def sidebar_art_css():
     except Exception:
         return None
 
-
 def head_as_base64():
     try:
         path = find_image(HEAD_NAME)
@@ -488,7 +525,6 @@ def head_as_base64():
         return to_b64(img)
     except Exception:
         return None
-
 
 def remove_white_bg(img):
     a = np.array(img.convert("RGBA"))
@@ -523,7 +559,6 @@ def remove_white_bg(img):
     a[:, :, 3] = (alpha * 255).astype(np.uint8)
     return Image.fromarray(a, "RGBA")
 
-
 @st.cache_data(show_spinner=False)
 def boot_image_b64(path, mtime):
     try:
@@ -535,7 +570,6 @@ def boot_image_b64(path, mtime):
         return to_b64(remove_white_bg(img))
     except Exception:
         return None
-
 
 def make_blip():
     rate = 22050
@@ -556,7 +590,6 @@ def make_blip():
         w.writeframes(bytes(frames))
     return buf.getvalue()
 
-
 def pick_greeting():
     hour = datetime.now().hour
     if 5 <= hour < 12:
@@ -569,14 +602,11 @@ def pick_greeting():
         part = "night"
     return random.choice(GREETINGS[part])
 
-
 @st.cache_resource
 def frame_holder():
     return {"lock": threading.Lock(), "frame": None, "time": 0.0}
 
-
 holder = frame_holder()
-
 
 def video_frame_callback(frame):
     now = time.time()
@@ -588,13 +618,11 @@ def video_frame_callback(frame):
             holder["time"] = now
     return frame
 
-
 def frame_changed(img, prev):
     small = np.asarray(img.convert("L").resize((32, 32)), dtype=float)
     if prev is None:
         return small, True
     return small, float(np.abs(small - prev).mean()) > WATCH_CHANGE
-
 
 avatar_img, avatar_path, avatar_card_b64 = make_avatar()
 CAPRI_AVATAR = avatar_path if avatar_path else CAPRI_AVATAR_FALLBACK
@@ -616,16 +644,9 @@ char_b64 = boot_image_b64(boot_path, os.path.getmtime(boot_path)) if boot_path e
 
 n_lines = len(BOOT_LINES)
 reveal_s = n_lines * BOOT_STEP
-hold_s = 0.55
-slash_s = 1.65
-total_s = reveal_s + hold_s + slash_s
-
+hold_s, fade_s = 0.8, 1.6      
+total_s = reveal_s + hold_s + fade_s
 p_hold = round((reveal_s + hold_s) / total_s * 100, 1)
-p_flash = round(p_hold + 2.5, 1)
-p_slash_in = round(p_hold + 7.5, 1)
-p_slash_hold = round(p_hold + 23.0, 1)
-p_wipe_end = round(p_hold + 36.0, 1)
-
 line_delays = "".join(
     ".bl%d { animation-delay: %ss; }\n" % (i, round(i * BOOT_STEP, 2))
     for i in range(n_lines)
@@ -720,169 +741,112 @@ html, body, .stApp {
     text-shadow: 2px 2px 0 #000000;
 }
 
-/* HIGH-TECH CROWDED CYBERPUNK LOADING SCREEN + PERSONA-STYLE TRANSITION */
 .boot-overlay {
     position: fixed;
-    inset: 0;
-    z-index: 99999;
-    pointer-events: none;
-    overflow: hidden;
-    animation: personaOverlayLife __BOOTTOTAL__s linear forwards;
-}
-@keyframes personaOverlayLife {
-    0%, 98% { opacity: 1; visibility: visible; }
-    100% { opacity: 0; visibility: hidden; }
-}
-
-/* Split-screen background halves that slam open diagonally when the slash hits */
-.boot-bg-top, .boot-bg-bot {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 999999;
     background: #020202;
-    background-image:
-        linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.45) 50%),
-        linear-gradient(90deg, rgba(255, 0, 0, 0.05), rgba(0, 255, 0, 0.03), rgba(0, 0, 255, 0.05));
+    pointer-events: auto;
+    overflow: hidden;
+    animation: bootEnd 0.01s steps(1, end) forwards;
+    animation-delay: __BOOTTOTAL__s;
+}
+@keyframes bootEnd { to { visibility: hidden; } }
+.boot-stage {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #020202;
+    background-image: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.4) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.04));
     background-size: 100% 4px, 8px 100%;
+    animation: stageShake 0.3s linear, stageHide 0.01s steps(1, end) forwards;
+    animation-delay: __BTX__s, calc(__BTX__s + 0.3s);
 }
-.boot-bg-top {
-    clip-path: polygon(0 0, 100% 0, 100% 40%, 0 60%);
-    animation: splitTop __BOOTTOTAL__s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+@keyframes stageShake {
+    0%, 100% { transform: translate(0, 0); }
+    15% { transform: translate(-8px, 4px); }
+    50% { transform: translate(6px, -5px); }
 }
-.boot-bg-bot {
-    clip-path: polygon(0 59.5%, 100% 39.5%, 100% 100%, 0 100%);
-    animation: splitBot __BOOTTOTAL__s cubic-bezier(0.76, 0, 0.24, 1) forwards;
-}
-@keyframes splitTop {
-    0%, __PSLASHHOLD__% { transform: translate(0, 0); }
-    __PWIPEEND__%, 100% { transform: translate(-115%, -35%); }
-}
-@keyframes splitBot {
-    0%, __PSLASHHOLD__% { transform: translate(0, 0); }
-    __PWIPEEND__%, 100% { transform: translate(115%, 35%); }
-}
+@keyframes stageHide { to { visibility: hidden; } }
 
-/* PERSONA-STYLE DIAGONAL CUT-IN SLASH & IMPACT FLASH */
-.p5-slash-flash {
-    position: absolute;
-    inset: 0;
-    z-index: 40;
-    background: #ffffff;
-    opacity: 0;
-    pointer-events: none;
-    animation: p5Flash __BOOTTOTAL__s ease-out forwards;
+.boot-trans { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 40; overflow: hidden; }
+.tr-flash {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #ffffff; opacity: 0;
+    animation: trFlash 0.4s ease-out both; animation-delay: __BTX__s;
 }
-@keyframes p5Flash {
-    0%, __PHOLD__% { opacity: 0; }
-    __PFLASH__% { opacity: 0.78; }
-    __PSLASHIN__% { opacity: 0; }
-    100% { opacity: 0; }
+@keyframes trFlash { 0% { opacity: 0; } 10% { opacity: 1; } 100% { opacity: 0; } }
+.tr-panel {
+    position: absolute; top: -6vh; bottom: -6vh; left: -32vw; width: 164vw;
+    transform: translateX(-130%) skewX(-14deg);
+    animation: trIn 0.3s cubic-bezier(0.7, 0, 0.2, 1) both, trOut 0.4s cubic-bezier(0.6, 0, 0.2, 1) forwards;
 }
-
-/* Jagged Persona Crimson/Neon Cut-In Ribbon */
-.p5-slash-bar {
-    position: absolute;
-    top: 38%;
-    left: -15%;
-    width: 130%;
-    height: 22vh;
-    z-index: 30;
-    background: linear-gradient(95deg, __PINK__ 0%, #090909 24%, #090909 76%, __GREEN__ 100%);
-    border-top: 6px solid #ffffff;
-    border-bottom: 6px solid #ffffff;
-    box-shadow: 0 12px 0 #000000, 0 -12px 0 #000000, 0 0 45px rgba(255, 49, 49, 0.8);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 28px;
-    transform: rotate(-11deg) scaleY(0);
-    opacity: 0;
-    animation: p5SlashBar __BOOTTOTAL__s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+.tr-panel.p1 { background: __PINK__;  animation-delay: calc(__BTX__s + 0.00s), calc(__BTX__s + 1.1s); }
+.tr-panel.p2 { background: #ffffff;   animation-delay: calc(__BTX__s + 0.06s), calc(__BTX__s + 1.0s); }
+.tr-panel.p3 { background: #050505;   animation-delay: calc(__BTX__s + 0.12s), calc(__BTX__s + 0.9s); }
+@keyframes trIn  { from { transform: translateX(-130%) skewX(-14deg); } to { transform: translateX(0) skewX(-14deg); } }
+@keyframes trOut { from { transform: translateX(0) skewX(-14deg); } to { transform: translateX(130%) skewX(-14deg); } }
+.tr-rays {
+    position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; opacity: 0;
+    background: repeating-conic-gradient(from 0deg, rgba(255, 49, 49, 0.55) 0deg 3deg, transparent 3deg 12deg);
+    -webkit-mask-image: radial-gradient(circle, #000 0%, transparent 62%);
+    mask-image: radial-gradient(circle, #000 0%, transparent 62%);
+    animation: trRays 1.2s linear both; animation-delay: calc(__BTX__s + 0.3s);
 }
-.p5-slash-bar::before {
-    content: "";
-    position: absolute;
-    inset: 8px 0;
-    border-top: 2px dashed rgba(255, 255, 255, 0.45);
-    border-bottom: 2px dashed rgba(255, 255, 255, 0.45);
-    pointer-events: none;
+@keyframes trRays { 0% { opacity: 0; transform: rotate(0deg) scale(0.6); } 20% { opacity: 1; } 100% { opacity: 0; transform: rotate(30deg) scale(1.1); } }
+.tr-burst {
+    position: absolute; top: 50%; left: 50%; width: 125vmin; height: 125vmin; margin: -62.5vmin 0 0 -62.5vmin;
+    background: __PINK__; opacity: 0;
+    animation: trBurst 0.4s cubic-bezier(0.2, 1.4, 0.3, 1) both, trBurstOut 0.3s ease-in forwards;
+    animation-delay: calc(__BTX__s + 0.3s), calc(__BTX__s + 1.0s);
 }
-.p5-slash-face {
-    height: 19vh;
-    width: auto;
-    filter: contrast(1.25) drop-shadow(5px 5px 0 __PINK__) drop-shadow(-3px -3px 0 __GREEN__);
-    transform: rotate(11deg) scale(1.1);
+.tr-burst::after { content: ""; position: absolute; top: 9%; left: 9%; right: 9%; bottom: 9%; background: #050505; clip-path: inherit; }
+@keyframes trBurst { from { opacity: 1; transform: scale(0) rotate(-50deg); } to { opacity: 1; transform: scale(1) rotate(0deg); } }
+@keyframes trBurstOut { to { opacity: 0; transform: scale(1.4) rotate(10deg); } }
+.tr-shards i {
+    position: absolute; top: 50%; left: 50%; width: 5vmin; height: 1.1vmin; margin: -0.5vmin 0 0 -2.5vmin;
+    background: #ffffff; opacity: 0;
+    animation: trShard 0.8s cubic-bezier(0.1, 0.8, 0.3, 1) forwards; animation-delay: calc(__BTX__s + 0.33s);
 }
-.p5-slash-text-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    line-height: 0.95;
+.tr-shards i:nth-child(3n) { background: __PINK__; }
+.tr-shards i:nth-child(5n) { background: __GREEN__; }
+@keyframes trShard {
+    0% { opacity: 1; transform: translate(0, 0) rotate(var(--rot)) scale(0.3); }
+    100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1.5); }
 }
-.p5-slash-kicker {
-    font-family: Consolas, monospace;
-    font-size: 0.95rem;
-    font-weight: 900;
-    letter-spacing: 5px;
-    color: __GREEN__;
-    background: #000000;
-    padding: 3px 10px;
-    margin-bottom: 6px;
-    border: 1px solid #ffffff;
+.tr-card {
+    position: absolute; top: 50%; left: 50%; width: 92vw; max-width: 1200px;
+    transform: translate(-50%, -50%) rotate(-4deg); text-align: center;
+    animation: trCardOut 0.3s ease-in forwards; animation-delay: calc(__BTX__s + 1.0s);
 }
-.p5-slash-text {
-    font-family: "Arial Black", Impact, sans-serif;
-    font-size: 3.4rem;
-    font-weight: 900;
-    letter-spacing: 6px;
-    color: #ffffff;
-    text-transform: uppercase;
-    text-shadow: 5px 5px 0 __PINK__, -3px -3px 0 __GREEN__;
-    white-space: nowrap;
+@keyframes trCardOut { to { opacity: 0; transform: translate(-50%, -50%) rotate(-4deg) scale(1.4); } }
+.tr-ransom { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 0.5vmin; }
+.rn {
+    display: inline-block; padding: 0.4vmin 1.4vmin; font-family: "Arial Black", Impact, sans-serif;
+    font-size: min(8.5vw, 11vh); line-height: 1.05; text-transform: uppercase;
+    opacity: 0; transform: translateY(var(--y)) rotate(var(--r));
+    animation: rnPop 0.2s cubic-bezier(0.2, 1.6, 0.4, 1) both;
 }
-@keyframes p5SlashBar {
-    0%, __PHOLD__% {
-        transform: rotate(-11deg) scaleY(0) translateX(-25%);
-        opacity: 0;
-    }
-    __PFLASH__% {
-        transform: rotate(-11deg) scaleY(1.12) translateX(0%);
-        opacity: 1;
-    }
-    __PSLASHIN__%, __PSLASHHOLD__% {
-        transform: rotate(-11deg) scaleY(1) translateX(1.5%);
-        opacity: 1;
-    }
-    __PWIPEEND__%, 100% {
-        transform: rotate(-11deg) scaleY(0) translateX(35%);
-        opacity: 0;
-    }
+.rn-a { background: #ffffff; color: #050505; box-shadow: 0.8vmin 0.8vmin 0 #050505; }
+.rn-b { background: #050505; color: #ffffff; border: 0.5vmin solid #ffffff; }
+.rn-c { background: __PINK__; color: #ffffff; box-shadow: 0.8vmin 0.8vmin 0 #050505; }
+.rn-gap { display: inline-block; width: 4vmin; }
+@keyframes rnPop {
+    from { opacity: 0; transform: translateY(var(--y)) rotate(calc(var(--r) - 40deg)) scale(0); }
+    to { opacity: 1; transform: translateY(var(--y)) rotate(var(--r)) scale(1); }
 }
-
-/* Terminal & HUD slam outward right as the slash hits */
-.boot-term {
-    animation: lineIn 0.2s ease-out forwards, p5TermExit __BOOTTOTAL__s cubic-bezier(0.7, 0, 0.2, 1) forwards !important;
+.tr-big {
+    margin-top: 1.5vmin; font-family: "Arial Black", Impact, sans-serif; font-style: italic;
+    font-size: min(26vw, 34vh); line-height: 0.95; color: #ffffff; letter-spacing: -0.02em;
+    text-shadow: 1.4vmin 1.4vmin 0 __PINK__, -0.6vmin -0.6vmin 0 #050505, 0 0 6vmin rgba(255, 49, 49, 0.8);
+    opacity: 0; animation: trSlam 0.3s cubic-bezier(0.1, 0.9, 0.2, 1.2) both;
 }
-@keyframes p5TermExit {
-    0%, __PHOLD__% { transform: translateX(0) skewX(0deg); opacity: 1; }
-    __PFLASH__% { transform: translateX(-22px) skewX(-6deg); opacity: 1; }
-    __PSLASHIN__%, 100% { transform: translateX(-140%) skewX(-16deg); opacity: 0; }
+@keyframes trSlam { from { opacity: 0; transform: scale(2.5) skewX(-10deg); filter: blur(6px); } to { opacity: 1; transform: scale(1) skewX(-10deg); filter: blur(0); } }
+.tr-bar {
+    display: inline-block; margin-top: 2vmin; padding: 1.2vmin 3.5vmin; background: #ffffff; color: #050505;
+    font-family: "Arial Black", Impact, sans-serif; font-size: min(3.2vw, 4.4vh); letter-spacing: 0.18em;
+    border-left: 1.4vmin solid __GREEN__; border-right: 1.4vmin solid __PINK__;
+    transform: skewX(-14deg); opacity: 0; animation: trBar 0.3s cubic-bezier(0.2, 0.9, 0.2, 1) both;
 }
-.boot-hud-top, .boot-hud-bottom {
-    animation: p5HudExit __BOOTTOTAL__s ease-in forwards;
-}
-@keyframes p5HudExit {
-    0%, __PHOLD__% { opacity: 1; }
-    __PFLASH__%, 100% { opacity: 0; }
-}
-.boot-char {
-    animation: bootReveal __BOOTREVEAL__s cubic-bezier(0.1, 0.8, 0.3, 1) forwards, p5CharExit __BOOTTOTAL__s cubic-bezier(0.7, 0, 0.2, 1) forwards !important;
-}
-@keyframes p5CharExit {
-    0%, __PHOLD__% { transform: translateX(0) scale(1); filter: brightness(1); opacity: 1; }
-    __PFLASH__% { transform: translateX(-30px) scale(1.08); filter: brightness(1.4) contrast(1.3); opacity: 1; }
-    __PSLASHIN__%, 100% { transform: translateX(130%) scale(1.15); opacity: 0; }
-}
+@keyframes trBar { from { opacity: 0; transform: translateX(14vw) skewX(-14deg); } to { opacity: 1; transform: translateX(0) skewX(-14deg); } }
 
 .boot-term {
     position: absolute;
@@ -923,7 +887,6 @@ __LINEDELAYS__
     to { opacity: 1; transform: translateX(0); filter: blur(0); }
 }
 
-/* REAL LOADING PROGRESS BAR */
 .boot-progress-wrap {
     margin-top: 18px;
     border: 2px solid __GREEN__;
@@ -942,7 +905,6 @@ __LINEDELAYS__
     to { width: 100%; }
 }
 
-/* CYBERPUNK CROWDED HUD WIDGETS */
 .boot-hud-top {
     position: absolute;
     top: 25px;
@@ -1010,7 +972,6 @@ __LINEDELAYS__
 }
 [data-testid="stChatMessage"] img { border-radius: 0; }
 
-/* Make chat bubble avatars larger */
 [data-testid="stChatMessage"] [data-testid="stChatMessageAvatar"] {
     width: 54px !important;
     height: 54px !important;
@@ -1038,13 +999,14 @@ __LINEDELAYS__
 }
 [data-testid="stChatInput"] textarea::placeholder { color: #999999 !important; }
 
-/* --- CAPRI // PERSONA-STYLE COMMAND SIDEBAR --- */
 [data-testid="stSidebar"] {
     position: relative;
     isolation: isolate;
     overflow: hidden;
     background:
-        radial-gradient(circle at 88% 12%, rgba(255,255,255,.12) 0 1px, transparent 1.8px) 0 0 / 9px 9px,
+        radial-gradient(ellipse at 78% 20%, rgba(128,220,88,.24), transparent 34%),
+        radial-gradient(ellipse at 12% 76%, rgba(25,230,210,.16), transparent 30%),
+        radial-gradient(ellipse at 90% 88%, rgba(255,49,49,.25), transparent 36%),
         repeating-linear-gradient(132deg, transparent 0 28px, rgba(0,0,0,.10) 29px 32px, transparent 33px 58px),
         linear-gradient(145deg, #ff3131 0%, #c90019 58%, #8d0010 100%) !important;
     border-right: 6px solid #000;
@@ -1083,7 +1045,6 @@ __LINEDELAYS__
     background: transparent !important;
 }
 
-/* Headings feel like slanted Persona menu labels */
 [data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3 {
     position: relative;
@@ -1097,18 +1058,36 @@ __LINEDELAYS__
     letter-spacing: 2px;
     padding: 7px 14px !important;
     margin: 22px 0 14px -9px !important;
-    border: 2px solid #fff;
-    box-shadow: 5px 5px 0 __GREEN__;
-    transform: skew(-13deg) rotate(-2deg);
-    transition: transform .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s;
+    border: 0 !important;
+    box-shadow: none !important;
+    clip-path: polygon(0 12%, 9% 12%, 7% 0, 100% 0, 94% 100%, 0 100%, 4% 54%);
+    filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff)
+            drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
+            drop-shadow(4px 4px 0 #050505)
+            drop-shadow(0 0 6px rgba(128,220,88,.45));
 }
-[data-testid="stSidebar"] h2:hover,
-[data-testid="stSidebar"] h3:hover {
-    transform: skew(-13deg) rotate(1deg) translateX(7px);
-    box-shadow: -3px 5px 0 __GREEN__;
+[data-testid="stSidebar"] h2::before,
+[data-testid="stSidebar"] h3::before {
+    content: "ϟ";
+    display: inline-block;
+    margin-right: 9px;
+    color: __GREEN__;
+    text-shadow: 0 0 8px __GREEN__;
+    transition: transform .2s cubic-bezier(.2,.8,.2,1);
 }
+[data-testid="stSidebar"] h2:hover::before,
+[data-testid="stSidebar"] h3:hover::before { transform: translateX(4px) scale(1.3); }
 
-/* Actual controls become animated command rows, not static tiles */
+[data-testid="stSidebar"] .stButton,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] {
+    filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff)
+            drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
+            drop-shadow(5px 5px 0 #050505)
+            drop-shadow(0 0 7px rgba(128,220,88,.4));
+    transition: filter .2s ease;
+    margin-top: 10px !important;
+    margin-bottom: 14px !important;
+}
 [data-testid="stSidebar"] .stButton button,
 [data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
     position: relative;
@@ -1120,14 +1099,12 @@ __LINEDELAYS__
     padding: 7px 13px !important;
     background: #050505 !important;
     color: #fff !important;
-    border: 2px solid #fff !important;
     border-radius: 0 !important;
-    box-shadow: 5px 5px 0 rgba(0,0,0,.75) !important;
+    clip-path: polygon(0 14%, 7% 14%, 5% 0, 100% 0, 95% 34%, 100% 42%, 94% 100%, 0 100%, 4% 61%, 0 54%);
+    border: 0 !important;
+    box-shadow: none !important;
     transform: skew(-13deg) rotate(-1.3deg) translateX(0);
-    transition:
-        transform .22s cubic-bezier(.18,.85,.25,1.25),
-        background .18s ease, border-color .18s ease,
-        box-shadow .22s ease, filter .22s ease !important;
+    transition: transform .22s cubic-bezier(.18,.85,.25,1.25), filter .22s ease !important;
     cursor: pointer;
 }
 [data-testid="stSidebar"] .stButton button::before,
@@ -1139,18 +1116,6 @@ __LINEDELAYS__
     background: __PINK__;
     transform: translateX(-110%) skew(-20deg);
     transition: transform .26s cubic-bezier(.2,.8,.2,1);
-}
-[data-testid="stSidebar"] .stButton button::after,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button::after {
-    content: "›";
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    color: __GREEN__;
-    font: 900 1.6rem/1 "Arial Black", sans-serif;
-    opacity: 0;
-    transform: translate(-12px,-50%);
-    transition: opacity .16s ease, transform .22s ease;
 }
 [data-testid="stSidebar"] .stButton button p,
 [data-testid="stSidebar"] [data-testid="stDownloadButton"] button p {
@@ -1164,96 +1129,56 @@ __LINEDELAYS__
     font-weight: 900 !important;
     transform: skew(13deg);
     text-shadow: 2px 2px 0 #8d0010;
-    transition: transform .2s ease, letter-spacing .2s ease, color .18s ease;
-}
-[data-testid="stSidebar"] .stButton button:hover,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover {
-    background: #050505 !important;
-    border-color: __GREEN__ !important;
-    box-shadow: 7px 7px 0 #050505, 0 0 0 2px __GREEN__ !important;
-    transform: skew(-13deg) rotate(1.2deg) translateX(9px) scale(1.025) !important;
-    filter: drop-shadow(0 0 7px rgba(128,220,88,.35));
 }
 [data-testid="stSidebar"] .stButton button:hover::before,
 [data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover::before {
     transform: translateX(0) skew(-20deg);
 }
-[data-testid="stSidebar"] .stButton button:hover::after,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover::after {
-    opacity: 1;
-    transform: translate(0,-50%);
-}
-[data-testid="stSidebar"] .stButton button:hover p,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover p {
-    color: #fff !important;
-    letter-spacing: 2px;
-    transform: skew(13deg) translateX(2px);
-    text-shadow: 2px 2px 0 #000;
-}
-[data-testid="stSidebar"] .stButton button:active,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:active {
-    transform: skew(-13deg) scale(.96) translate(3px,3px) !important;
-    box-shadow: 1px 1px 0 #050505 !important;
-    filter: brightness(1.25);
-}
-[data-testid="stSidebar"] .stButton button:focus-visible,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:focus-visible {
-    outline: 3px dashed __GREEN__ !important;
-    outline-offset: 5px;
-}
 
-/* Toggles, selects and expanders get the same high-contrast menu language */
-[data-testid="stSidebar"] [data-testid="stToggle"] {
-    padding: 8px 10px;
-    margin: 5px 0 9px;
-    background: rgba(0,0,0,.78);
-    border-left: 3px solid #fff;
-    transition: border-color .2s, transform .2s, background .2s;
+[data-testid="stSidebar"] label[data-baseweb="checkbox"] {
+    position: relative;
+    isolation: isolate;
+    background: #050505 !important;
+    border: 3px solid #ffffff !important;
+    border-radius: 0 !important;
+    box-shadow: 5px 5px 0 #000000 !important;
+    filter: drop-shadow(4px 4px 0 #050505) drop-shadow(0 0 6px rgba(128,220,88,.35)) !important;
+    padding: 10px 14px !important;
+    margin: 8px auto !important;
+    width: 96% !important;
+    transform: skew(-4deg) !important;
 }
-[data-testid="stSidebar"] [data-testid="stToggle"]:hover {
-    border-left-color: __GREEN__;
-    background: rgba(0,0,0,.94);
-    transform: translateX(5px);
-}
-[data-testid="stSidebar"] [data-testid="stToggle"] label,
-[data-testid="stSidebar"] [data-testid="stCheckbox"] label {
+[data-testid="stSidebar"] label[data-baseweb="checkbox"] span {
     color: #fff !important;
     font-weight: 800 !important;
 }
-[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
-[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div,
-[data-testid="stSidebar"] [data-testid="stFileUploader"] section,
-[data-testid="stSidebar"] [data-testid="stExpander"] {
-    background: rgba(0,0,0,.88) !important;
-    color: #fff !important;
-    border: 2px solid #fff !important;
-    border-radius: 0 !important;
-    box-shadow: 4px 4px 0 rgba(0,0,0,.65);
-}
-[data-testid="stSidebar"] [data-testid="stExpander"] summary {
-    font-family: "Arial Black", Impact, sans-serif;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-}
-[data-testid="stSidebar"] [data-testid="stExpander"]:hover {
-    border-color: __GREEN__ !important;
-    transform: translateX(3px);
-    transition: transform .18s ease, border-color .18s ease;
-}
-[data-testid="stSidebar"] [data-testid="stProgress"] > div {
-    background: rgba(0,0,0,.7) !important;
-    border: 2px solid #fff;
-    border-radius: 0 !important;
-    padding: 2px;
-}
-[data-testid="stSidebar"] [data-testid="stProgress"] > div > div {
-    background: repeating-linear-gradient(135deg, __GREEN__ 0 8px, #4f9c35 8px 13px) !important;
-    background-size: 22px 22px;
-    animation: progressRun .7s linear infinite;
-}
-@keyframes progressRun { to { background-position: 22px 0; } }
 
-/* Capri's portrait has a living idle animation */
+[data-testid="stSidebar"] [data-testid="stSelectbox"],
+[data-testid="stSidebar"] [data-testid="stTextInput"],
+[data-testid="stSidebar"] [data-testid="stExpander"],
+[data-testid="stSidebar"] [data-testid="stSlider"] {
+    position: relative;
+    isolation: isolate;
+    background: #050505 !important;
+    border: 3px solid #ffffff !important;
+    border-radius: 0 !important;
+    box-shadow: 5px 5px 0 #000000 !important;
+    filter: drop-shadow(4px 4px 0 #050505) drop-shadow(0 0 6px rgba(128,220,88,.35)) !important;
+    padding: 10px 14px !important;
+    margin: 8px auto !important;
+    width: 96% !important;
+    transform: skew(-4deg) !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div,
+[data-testid="stSidebar"] [data-testid="stTextInput"] > div,
+[data-testid="stSidebar"] [data-testid="stExpander"] > div,
+[data-testid="stSidebar"] [data-testid="stSlider"] > div {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
 .side-card {
     position: relative;
     width: 170px;
@@ -1262,31 +1187,12 @@ __LINEDELAYS__
     margin: 10px auto 25px;
     background: #000;
     transform: skew(-5deg) rotate(-4deg);
-    animation: portraitFloat 4s ease-in-out infinite;
-    transition: transform .28s cubic-bezier(.2,.8,.2,1), box-shadow .25s;
-}
-.side-card::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: linear-gradient(transparent 48%, rgba(255,255,255,.16) 50%, transparent 53%);
-    background-size: 100% 12px;
-    opacity: .28;
-    animation: portraitScan 5s linear infinite;
-}
-.side-card:hover {
-    transform: skew(-3deg) rotate(0deg) scale(1.045);
-    box-shadow: 9px 9px 0 __GREEN__;
+    border-radius: 7px !important;
+    border-color: rgba(255,255,255,.92) !important;
+    outline: 1px solid rgba(128,220,88,.85) !important;
 }
 .side-card img { width: 100%; display: block; }
-@keyframes portraitFloat {
-    0%,100% { translate: 0 0; }
-    50% { translate: 0 -5px; }
-}
-@keyframes portraitScan { to { background-position: 0 24px; } }
 
-/* Status panel: moving scanline + sync pulse */
 .p5-status-box {
     position: relative;
     overflow: hidden;
@@ -1297,15 +1203,6 @@ __LINEDELAYS__
     margin-bottom: 20px;
     transform: skew(-8deg) rotate(-1deg);
 }
-.p5-status-box::after {
-    content: "";
-    position: absolute;
-    inset: -100% 0;
-    pointer-events: none;
-    background: linear-gradient(transparent, rgba(128,220,88,.15), transparent);
-    animation: statusScan 4s linear infinite;
-}
-@keyframes statusScan { to { transform: translateY(200%); } }
 .p5-mood-tag {
     background: __GREEN__;
     color: #000 !important;
@@ -1317,30 +1214,15 @@ __LINEDELAYS__
     letter-spacing: 1px;
     margin-bottom: 8px;
     transform: skew(4deg);
-    animation: moodPop 3.8s ease-in-out infinite;
 }
-@keyframes moodPop { 0%,90%,100% { filter: brightness(1); } 93% { filter: brightness(1.7); } }
 .p5-sync-row {
     font-family: "Arial Black", Impact, sans-serif;
     font-size: .95rem;
     color: #fff;
     letter-spacing: 1px;
 }
+.p5-sync-row span { font-size: 1.5rem; text-shadow: 0 0 10px rgba(255,49,49,.9); }
 
-/* Respect reduced-motion preferences */
-@media (prefers-reduced-motion: reduce) {
-    [data-testid="stSidebar"]::before, .side-card, .side-card::after,
-    .p5-status-box::after, .p5-mood-tag,
-    [data-testid="stSidebar"] [data-testid="stProgress"] > div > div {
-        animation: none !important;
-    }
-    [data-testid="stSidebar"] .stButton button,
-    [data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
-        transition: none !important;
-    }
-}
-
-/* --- CAPRI // EDITORIAL COMMAND LAYER --- */
 .capri-side-masthead {
     position: relative;
     margin: 4px 2px 18px;
@@ -1350,427 +1232,16 @@ __LINEDELAYS__
     border: 2px solid #fff;
     box-shadow: 6px 6px 0 __GREEN__;
     transform: skew(-5deg) rotate(-1deg);
-    overflow: hidden;
 }
-.capri-side-masthead::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: .22;
-    background: repeating-linear-gradient(135deg, transparent 0 9px, #fff 10px 11px, transparent 12px 19px);
-    transform: translateX(-65%);
-    animation: mastheadSweep 7s ease-in-out infinite;
-}
-@keyframes mastheadSweep { 0%,65%,100% { transform: translateX(-65%); } 82% { transform: translateX(65%); } }
-.capri-side-topline, .capri-side-subline, .capri-side-wordmark { position: relative; z-index: 1; }
 .capri-side-topline { display:flex; align-items:center; gap:7px; font: 900 .58rem/1.2 Consolas, monospace; letter-spacing:1.2px; color:#ddd; }
-.capri-live-dot { width:7px; height:7px; display:inline-block; border-radius:50%; background:__GREEN__; box-shadow:0 0 9px __GREEN__; animation: liveBlink 1.2s steps(2,end) infinite; }
-@keyframes liveBlink { 50% { opacity:.25; } }
+.capri-live-dot { width:7px; height:7px; display:inline-block; border-radius:50%; background:__GREEN__; box-shadow:0 0 9px __GREEN__; }
 .capri-side-wordmark { margin-top:3px; font: 1000 2.65rem/.95 "Arial Black", Impact, sans-serif; letter-spacing:-2px; text-shadow:3px 3px 0 __PINK__; }
-.capri-side-wordmark span { color:__GREEN__; animation: cursorBlink 1s steps(2,end) infinite; }
-@keyframes cursorBlink { 50% { opacity:0; } }
+.capri-side-wordmark span { color:__GREEN__; }
 .capri-side-subline { margin-top:7px; font:800 .55rem/1.3 Consolas, monospace; letter-spacing:1px; color:#bbb; }
 .capri-side-subline b { color:__GREEN__; }
 .capri-side-rule { height:5px; margin-top:10px; background:__PINK__; transform:skew(-25deg); }
-.capri-side-rule i { display:block; width:28%; height:100%; background:__GREEN__; box-shadow:0 0 8px __GREEN__; animation: ruleTravel 2.8s ease-in-out infinite alternate; }
-@keyframes ruleTravel { from { margin-left:0; } to { margin-left:72%; } }
+.capri-side-rule i { display:block; width:28%; height:100%; background:__GREEN__; box-shadow:0 0 8px __GREEN__; }
 
-/* Portrait becomes a character panel, not a floating thumbnail. */
-.side-portrait-stage { position:relative; margin:3px auto 19px; padding:17px 8px 8px; width:100%; }
-.side-portrait-stage::before { content:""; position:absolute; inset:5px 13px 19px 4px; border:1px solid rgba(255,255,255,.65); transform:rotate(5deg); pointer-events:none; }
-.side-portrait-stage::after { content:""; position:absolute; right:4px; top:17px; width:32px; height:32px; border-top:5px solid __GREEN__; border-right:5px solid __GREEN__; pointer-events:none; }
-.side-portrait-stamp { position:relative; z-index:2; width:max-content; margin:0 0 -7px 12px; padding:4px 9px; color:#000; background:__GREEN__; font:900 .62rem/1 "Arial Black",Impact,sans-serif; letter-spacing:1.4px; transform:rotate(-4deg); box-shadow:3px 3px 0 #000; }
-.side-portrait-stamp span { color:__PINK__; font-size:.7rem; }
-.side-card { z-index:1; width:min(178px,76%); margin:0 auto 7px; border:4px solid #050505; outline:2px solid #fff; box-shadow:8px 8px 0 __PINK__; transform:rotate(-3deg); }
-.side-card:hover { transform:rotate(1deg) translateY(-4px) scale(1.035); box-shadow:10px 10px 0 __GREEN__; }
-.side-portrait-index { position:relative; z-index:2; width:max-content; margin:8px 5px 0 auto; padding:3px 8px; background:#050505; border-left:3px solid __GREEN__; color:#fff; font:900 .58rem/1.2 Consolas,monospace; letter-spacing:1.3px; transform:skew(-12deg); }
-.side-portrait-index b { color:__PINK__; }
-
-/* Make every interactive control respond as one designed interface. */
-[data-testid="stSidebar"] [data-testid="stTextInput"] input,
-[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="combobox"] {
-    transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease !important;
-}
-[data-testid="stSidebar"] [data-testid="stTextInput"]:focus-within,
-[data-testid="stSidebar"] [data-testid="stSelectbox"]:focus-within {
-    transform:translateX(3px);
-    filter:drop-shadow(4px 4px 0 rgba(0,0,0,.7));
-}
-[data-testid="stSidebar"] [data-testid="stTextInput"]:focus-within input,
-[data-testid="stSidebar"] [data-testid="stSelectbox"]:focus-within [role="combobox"] {
-    border-color:__GREEN__ !important;
-    box-shadow:0 0 0 2px #050505, 0 0 0 4px __GREEN__ !important;
-}
-[data-testid="stSidebar"] [data-testid="stToggle"] [role="switch"] {
-    transition:transform .2s cubic-bezier(.2,.8,.2,1), filter .2s ease;
-}
-[data-testid="stSidebar"] [data-testid="stToggle"]:hover [role="switch"] {
-    transform:scale(1.12) rotate(-5deg);
-    filter:drop-shadow(0 0 5px __GREEN__);
-}
-[data-testid="stSidebar"] [data-testid="stExpander"] summary {
-    position:relative;
-    transition:padding-left .2s ease, color .2s ease;
-}
-[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover { padding-left:18px; color:__GREEN__ !important; }
-[data-testid="stSidebar"] [data-testid="stExpander"] summary svg { transition:transform .22s ease; }
-[data-testid="stSidebar"] [data-testid="stExpander"][open] summary svg { transform:rotate(90deg); }
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { padding-left:3px; border-left:2px solid rgba(255,255,255,.55); }
-
-/* Less constant movement; keep the punch for actual hover and selection. */
-@media (prefers-reduced-motion: reduce) {
-    .capri-side-masthead::before, .capri-live-dot, .capri-side-wordmark span,
-    .capri-side-rule i { animation:none !important; }
-}
-
-
-/* --- CAPRI // NEON-LIT HARDWARE FINISH ---
-/* Keep the Persona angles, but replace flat square slabs with softly cut,
-   illuminated surfaces inspired by Capri's luminous green/pink character art. */
-:root {
-    --capri-green: __GREEN__;
-    --capri-pink: __PINK__;
-    --capri-cyan: #19e6d2;
-}
-
-/* Ambient light pools behind the sidebar instead of a flat red sheet. */
-[data-testid="stSidebar"] {
-    background:
-        radial-gradient(ellipse at 78% 20%, rgba(128,220,88,.24), transparent 34%),
-        radial-gradient(ellipse at 12% 76%, rgba(25,230,210,.16), transparent 30%),
-        radial-gradient(ellipse at 90% 88%, rgba(255,49,49,.25), transparent 36%),
-        repeating-linear-gradient(132deg, transparent 0 28px, rgba(0,0,0,.10) 29px 32px, transparent 33px 58px),
-        linear-gradient(145deg, #ff3131 0%, #c90019 58%, #8d0010 100%) !important;
-}
-
-/* A soft illuminated rim with a slow moving highlight. */
-.capri-side-masthead,
-.p5-status-box,
-[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
-[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div,
-[data-testid="stSidebar"] [data-testid="stExpander"],
-[data-testid="stSidebar"] .stButton button,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
-    border-radius: 9px !important;
-    border: 1px solid rgba(255,255,255,.82) !important;
-    box-shadow:
-        0 0 0 1px rgba(0,0,0,.9),
-        0 0 8px rgba(128,220,88,.42),
-        0 0 19px rgba(128,220,88,.18),
-        inset 0 0 13px rgba(255,255,255,.045) !important;
-    transition: border-color .22s ease, box-shadow .25s ease,
-                transform .25s cubic-bezier(.2,.8,.2,1), filter .25s ease !important;
-}
-
-/* Thin animated light that travels along the panel edge. */
-.capri-side-masthead::after,
-.p5-status-box::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    padding: 1px;
-    pointer-events: none;
-    background: linear-gradient(115deg,
-        transparent 4%, rgba(255,255,255,.1) 22%,
-        __GREEN__ 42%, #19e6d2 53%, __PINK__ 68%, transparent 88%);
-    background-size: 240% 100%;
-    animation: capriEdgeLight 5.5s linear infinite;
-    opacity: .78;
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-}
-@keyframes capriEdgeLight {
-    from { background-position: 100% 0; }
-    to { background-position: -140% 0; }
-}
-
-/* Buttons glow on hover like illuminated controls, not hard paper cut-outs. */
-[data-testid="stSidebar"] .stButton button:hover,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover {
-    border-color: __GREEN__ !important;
-    box-shadow:
-        0 0 0 1px #050505,
-        0 0 7px __GREEN__,
-        0 0 18px rgba(128,220,88,.72),
-        0 0 34px rgba(128,220,88,.24),
-        inset 0 0 15px rgba(128,220,88,.16) !important;
-    filter: brightness(1.12) saturate(1.12);
-}
-
-/* Inputs and dropdowns get a soft inner glow when active. */
-[data-testid="stSidebar"] [data-testid="stTextInput"]:focus-within,
-[data-testid="stSidebar"] [data-testid="stSelectbox"]:focus-within {
-    filter: drop-shadow(0 0 7px rgba(128,220,88,.55)) !important;
-}
-[data-testid="stSidebar"] [data-testid="stTextInput"]:focus-within input,
-[data-testid="stSidebar"] [data-testid="stSelectbox"]:focus-within [role="combobox"] {
-    border-color: __GREEN__ !important;
-    box-shadow: inset 0 0 12px rgba(128,220,88,.15), 0 0 12px rgba(128,220,88,.48) !important;
-}
-
-/* Character portrait: luminous aura rather than a plain offset shadow. */
-.side-card {
-    border-radius: 7px !important;
-    border-color: rgba(255,255,255,.92) !important;
-    outline: 1px solid rgba(128,220,88,.85) !important;
-    box-shadow:
-        0 0 0 3px rgba(0,0,0,.92),
-        0 0 12px rgba(128,220,88,.65),
-        0 0 28px rgba(25,230,210,.25) !important;
-}
-.side-card:hover {
-    box-shadow:
-        0 0 0 3px rgba(0,0,0,.92),
-        0 0 15px __GREEN__,
-        0 0 34px rgba(25,230,210,.48),
-        0 0 48px rgba(255,49,49,.2) !important;
-}
-
-/* Status panel keeps its slanted silhouette, now with a lit edge. */
-.p5-status-box {
-    border-color: rgba(255,255,255,.92) !important;
-    box-shadow: 0 0 12px rgba(128,220,88,.3),
-                0 0 26px rgba(128,220,88,.12),
-                inset 0 0 24px rgba(128,220,88,.07) !important;
-}
-
-/* Chat area echoes the same illuminated material. */
-[data-testid="stChatMessage"] {
-    border-radius: 10px !important;
-    box-shadow: 0 0 10px rgba(128,220,88,.2),
-                inset 0 0 18px rgba(255,255,255,.035) !important;
-}
-[data-testid="stChatInput"] {
-    border-radius: 12px !important;
-    box-shadow: 0 0 12px rgba(128,220,88,.32),
-                0 0 26px rgba(128,220,88,.12) !important;
-}
-[data-testid="stChatInput"] > div { border-radius: 9px !important; }
-
-@media (prefers-reduced-motion: reduce) {
-    .capri-side-masthead::after, .p5-status-box::before { animation: none !important; }
-}
-
-/* --- CAPRI // BOLD LIGHTNING-CUT PANELS ---
-   The panel silhouette itself is jagged and substantial; the glow follows
-   the whole cut shape instead of being a thin line around a square box. */
-:root {
-    --capri-zap: #80dc58;
-    --capri-zap-cyan: #19e6d2;
-    --capri-zap-red: #ff3131;
-}
-
-/* Main identity + status become chunky electric plates. */
-.capri-side-masthead {
-    border-radius: 0 !important;
-    clip-path: polygon(
-        0 12%, 7% 12%, 5% 0, 100% 0,
-        96% 25%, 100% 31%, 94% 100%,
-        4% 100%, 7% 76%, 0 70%
-    );
-    /* Filter outlines follow the clipped silhouette exactly. */
-    filter:
-        drop-shadow(0 0 1.15px rgba(255,255,255,.98))
-        drop-shadow(6px 5px 0 #050505)
-        drop-shadow(0 0 7px rgba(128,220,88,.9))
-        drop-shadow(0 0 17px rgba(25,230,210,.38));
-    padding: 16px 15px 19px !important;
-    margin: 8px 5px 24px 2px !important;
-    background: linear-gradient(115deg, #050505 0 72%, #171717 72% 100%) !important;
-}
-.capri-side-masthead::after {
-    content: "";
-    position: absolute;
-    z-index: 0;
-    pointer-events: none;
-    inset: 0;
-    opacity: .25;
-    background: linear-gradient(115deg, transparent 0 43%, var(--capri-zap) 44% 47%, transparent 48% 100%);
-    clip-path: polygon(0 12%, 7% 12%, 5% 0, 100% 0, 96% 25%, 100% 31%, 94% 100%, 4% 100%, 7% 76%, 0 70%);
-}
-
-.p5-status-box {
-    border-radius: 0 !important;
-    clip-path: polygon(
-        0 10%, 8% 10%, 5% 0, 100% 0,
-        95% 29%, 100% 36%, 92% 100%,
-        0 100%, 5% 66%, 0 59%
-    );
-    padding: 20px 18px 22px !important;
-    margin: 7px 8px 25px 2px !important;
-    /* One crisp white edge, generated from the same clipped alpha shape. */
-    border: 0 !important;
-    filter:
-        drop-shadow(0 0 1.25px rgba(255,255,255,.98))
-        drop-shadow(7px 6px 0 #050505)
-        drop-shadow(0 0 8px rgba(128,220,88,.85))
-        drop-shadow(0 0 19px rgba(25,230,210,.32));
-    background: linear-gradient(120deg, #050505 0 76%, #101b12 76% 100%) !important;
-}
-.p5-status-box::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: .22;
-    background: linear-gradient(120deg, transparent 0 38%, var(--capri-zap) 39% 43%, transparent 44% 100%);
-}
-.p5-status-box::after {
-    opacity: .8;
-    background: linear-gradient(transparent, rgba(128,220,88,.19), transparent);
-}
-
-/* Settings controls get matching lightning-cut corners, not tiny rounded cards. */
-[data-testid="stSidebar"] .stButton button,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
-    border-radius: 0 !important;
-    clip-path: polygon(0 14%, 7% 14%, 5% 0, 100% 0, 95% 34%, 100% 42%, 94% 100%, 0 100%, 4% 61%, 0 54%);
-    border: 0 !important;
-    filter: drop-shadow(0 0 1.1px rgba(255,255,255,.98))
-            drop-shadow(4px 4px 0 #050505)
-            drop-shadow(0 0 5px rgba(128,220,88,.42));
-    margin-top: 10px !important;
-    margin-bottom: 14px !important;
-}
-[data-testid="stSidebar"] .stButton button:hover,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover {
-    filter: drop-shadow(0 0 1.1px rgba(255,255,255,.98))
-            drop-shadow(5px 5px 0 #050505)
-            drop-shadow(0 0 8px var(--capri-zap))
-            drop-shadow(0 0 17px rgba(128,220,88,.7)) brightness(1.12) !important;
-    transform: translateX(5px) skewX(-2deg) !important;
-}
-
-[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
-[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div,
-[data-testid="stSidebar"] [data-testid="stExpander"] {
-    border-radius: 0 !important;
-    clip-path: polygon(0 12%, 6% 12%, 4% 0, 100% 0, 96% 35%, 100% 43%, 94% 100%, 0 100%, 4% 62%, 0 54%);
-    border: 0 !important;
-    filter: drop-shadow(0 0 1.1px rgba(255,255,255,.98))
-            drop-shadow(4px 4px 0 rgba(0,0,0,.9))
-            drop-shadow(0 0 6px rgba(128,220,88,.38));
-}
-[data-testid="stSidebar"] [data-testid="stTextInput"] input,
-[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="combobox"] {
-    border-radius: 0 !important;
-}
-[data-testid="stSidebar"] [data-testid="stSelectbox"]:focus-within,
-[data-testid="stSidebar"] [data-testid="stTextInput"]:focus-within {
-    filter: drop-shadow(5px 5px 0 #050505)
-            drop-shadow(0 0 9px var(--capri-zap)) !important;
-}
-
-/* A short, bold electric slash reinforces the shape language in section labels. */
-[data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 {
-    border-radius: 0 !important;
-    clip-path: polygon(0 12%, 9% 12%, 7% 0, 100% 0, 94% 100%, 0 100%, 4% 54%);
-    filter: drop-shadow(0 0 1.1px rgba(255,255,255,.98))
-            drop-shadow(4px 4px 0 #050505)
-            drop-shadow(0 0 7px rgba(128,220,88,.55));
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .capri-side-masthead, .p5-status-box,
-    [data-testid="stSidebar"] .stButton button {
-        transition: none !important;
-    }
-}
-
-
-/* --- CAPRI // VOLTAGE UPGRADE ---
-   Same lightning-cut language, now charged: a live bolt down the edge,
-   lit switches, a bolt-shaped slider, glitching wordmark and zap badge. */
-
-/* a live lightning bolt running down the sidebar's right edge */
-[data-testid="stSidebarUserContent"] { position: relative; }
-[data-testid="stSidebarUserContent"]::after {
-    content: "";
-    position: absolute;
-    top: 0; bottom: 0; right: 0;
-    width: 26px;
-    z-index: 0;
-    pointer-events: none;
-    background: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='220' viewBox='0 0 26 220'%3E%3Cpath d='M13 0 L5 46 L15 50 L6 104 L18 108 L8 166 L16 170 L13 220' fill='none' stroke='%2380dc58' stroke-width='3'/%3E%3Cpath d='M13 0 L5 46 L15 50 L6 104 L18 108 L8 166 L16 170 L13 220' fill='none' stroke='%23ffffff' stroke-width='1'/%3E%3C/svg%3E") repeat-y;
-    background-size: 26px 220px;
-    filter: drop-shadow(0 0 4px __GREEN__) drop-shadow(0 0 10px rgba(25,230,210,.55));
-    opacity: .4;
-    animation: boltStrike 6s infinite;
-}
-@keyframes boltStrike {
-    0%, 84%, 100% { opacity: .38; }
-    86% { opacity: 1; }
-    88% { opacity: .22; }
-    90% { opacity: 1; }
-    94% { opacity: .5; }
-}
-
-/* section labels carry a bolt */
-[data-testid="stSidebar"] h2::before,
-[data-testid="stSidebar"] h3::before {
-    content: "ϟ";
-    display: inline-block;
-    margin-right: 9px;
-    color: __GREEN__;
-    text-shadow: 0 0 8px __GREEN__;
-    transition: transform .2s cubic-bezier(.2,.8,.2,1);
-}
-[data-testid="stSidebar"] h2:hover::before,
-[data-testid="stSidebar"] h3:hover::before { transform: translateX(4px) scale(1.3); }
-
-/* switches become lightning-cut rows that light up when ON */
-[data-testid="stSidebar"] label[data-baseweb="checkbox"] {
-    padding: 9px 22px 9px 12px;
-    margin: 6px 4px 10px 0;
-    background: linear-gradient(100deg, rgba(0,0,0,.88) 0 78%, rgba(0,0,0,.62));
-    border-left: 3px solid rgba(255,255,255,.8);
-    clip-path: polygon(0 0, 100% 0, 95% 50%, 100% 100%, 0 100%);
-    transition: background .28s ease, border-color .22s ease, transform .2s ease;
-}
-[data-testid="stSidebar"] label[data-baseweb="checkbox"]:hover { transform: translateX(5px); }
-[data-testid="stSidebar"] label[data-baseweb="checkbox"]:has(input:checked) {
-    background: linear-gradient(100deg, rgba(128,220,88,.34), rgba(0,0,0,.9) 62%);
-    border-left-color: __GREEN__;
-}
-
-/* meters end in a lightning notch and glow */
-[data-testid="stSidebar"] [data-testid="stProgress"] > div {
-    box-shadow: 0 0 12px rgba(128,220,88,.45), 4px 4px 0 rgba(0,0,0,.7);
-}
-[data-testid="stSidebar"] [data-testid="stProgress"] > div > div {
-    clip-path: polygon(0 0, 100% 0, calc(100% - 9px) 50%, 100% 100%, 0 100%);
-}
-
-/* the slider handle is a little bolt */
-[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
-    background: __GREEN__ !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    clip-path: polygon(62% 0, 14% 56%, 46% 56%, 30% 100%, 88% 38%, 56% 38%);
-    scale: 1.9;
-}
-[data-testid="stSidebar"] [data-testid="stSliderThumbValue"] {
-    color: #fff !important;
-    font-weight: 900 !important;
-    text-shadow: 0 0 6px __GREEN__;
-}
-
-/* big charged bond number */
-.p5-sync-row span { font-size: 1.5rem; text-shadow: 0 0 10px rgba(255,49,49,.9); }
-
-/* wordmark glitches now and then; zap badge pulses */
-.capri-side-wordmark { animation: wordGlitch 7s infinite; }
-@keyframes wordGlitch {
-    0%, 89%, 100% { transform: none; text-shadow: 3px 3px 0 __PINK__; }
-    91% { transform: translateX(-3px); text-shadow: -3px 0 #19e6d2, 3px 0 __PINK__; }
-    93% { transform: translateX(3px) skewX(-6deg); text-shadow: 3px 0 #19e6d2, -3px 0 __PINK__; }
-    95% { transform: none; text-shadow: 3px 3px 0 __PINK__; }
-}
 .capri-bolt-badge {
     position: absolute;
     right: 14px; top: 9px;
@@ -1778,127 +1249,20 @@ __LINEDELAYS__
     font: 900 1.7rem/1 "Arial Black", Impact, sans-serif;
     color: __GREEN__;
     text-shadow: 0 0 8px __GREEN__, 0 0 18px #19e6d2;
-    animation: badgeZap 3s infinite;
-}
-@keyframes badgeZap {
-    0%, 78%, 100% { opacity: .75; transform: scale(1) rotate(0); }
-    83% { opacity: 1; transform: scale(1.4) rotate(-9deg); }
-    88% { opacity: .5; transform: scale(1) rotate(0); }
 }
 
-/* thin charged scrollbar */
-[data-testid="stSidebar"] *::-webkit-scrollbar { width: 8px; }
-[data-testid="stSidebar"] *::-webkit-scrollbar-track { background: rgba(0,0,0,.55); }
-[data-testid="stSidebar"] *::-webkit-scrollbar-thumb {
-    background: linear-gradient(__GREEN__, #19e6d2);
-    border: 1px solid #050505;
-}
+.side-portrait-stage { position:relative; margin:3px auto 19px; padding:17px 8px 8px; width:100%; }
+.side-portrait-stamp { position:relative; z-index:2; width:max-content; margin:0 0 -7px 12px; padding:4px 9px; color:#000; background:__GREEN__; font:900 .62rem/1 "Arial Black",Impact,sans-serif; letter-spacing:1.4px; transform:rotate(-4deg); box-shadow:3px 3px 0 #000; }
+.side-portrait-stamp span { color:__PINK__; font-size:.7rem; }
+.side-portrait-index { position:relative; z-index:2; width:max-content; margin:8px 5px 0 auto; padding:3px 8px; background:#050505; border-left:3px solid __GREEN__; color:#fff; font:900 .58rem/1.2 Consolas,monospace; letter-spacing:1.3px; transform:skew(-12deg); }
+.side-portrait-index b { color:__PINK__; }
 
-@media (prefers-reduced-motion: reduce) {
-    [data-testid="stSidebarUserContent"]::after, .capri-side-wordmark, .capri-bolt-badge { animation: none !important; }
-}
-
-
-/* --- CAPRI // OUTLINE POLISH ---
-   Before: the white edge + shadow sat on the same element as the jagged cut,
-   so the cut sliced them off. Now the outline is drawn OUTSIDE the cut shape,
-   so every plate, button and field has a crisp edge that follows its zigzag. */
-
-/* plates (identity + status): outline lives on a wrapper */
-.capri-side-masthead, .p5-status-box { filter: none !important; }
 .plate-fx {
     filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff)
             drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
             drop-shadow(7px 6px 0 #050505)
             drop-shadow(0 0 10px rgba(128,220,88,.5));
-    transition: filter .25s ease;
 }
-.plate-fx:hover {
-    filter: drop-shadow(2px 0 0 __GREEN__) drop-shadow(-2px 0 0 __GREEN__)
-            drop-shadow(0 2px 0 __GREEN__) drop-shadow(0 -2px 0 __GREEN__)
-            drop-shadow(7px 6px 0 #050505)
-            drop-shadow(0 0 16px rgba(128,220,88,.75));
-}
-
-/* buttons: outline on the widget wrapper, button itself stays clean */
-[data-testid="stSidebar"] .stButton,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] {
-    filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff)
-            drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
-            drop-shadow(5px 5px 0 #050505)
-            drop-shadow(0 0 7px rgba(128,220,88,.4));
-    transition: filter .2s ease;
-}
-[data-testid="stSidebar"] .stButton:hover,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"]:hover {
-    filter: drop-shadow(2px 0 0 __GREEN__) drop-shadow(-2px 0 0 __GREEN__)
-            drop-shadow(0 2px 0 __GREEN__) drop-shadow(0 -2px 0 __GREEN__)
-            drop-shadow(5px 5px 0 #050505)
-            drop-shadow(0 0 14px rgba(128,220,88,.75));
-}
-[data-testid="stSidebar"] .stButton button,
-[data-testid="stSidebar"] [data-testid="stDownloadButton"] button { filter: none !important; }
-
-/* section labels: same crisp edge, from their wrapper */
-[data-testid="stSidebar"] [data-testid="stHeading"] {
-    filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff)
-            drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
-            drop-shadow(4px 4px 0 #050505)
-            drop-shadow(0 0 6px rgba(128,220,88,.45));
-}
-[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
-    filter: none !important;
-    border: 0 !important;
-}
-
-/* fields, dropdowns, expanders and switches: outline layer sits behind the content */
-[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
-[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div,
-[data-testid="stSidebar"] [data-testid="stExpander"],
-[data-testid="stSidebar"] label[data-baseweb="checkbox"] {
-    position: relative;
-    isolation: isolate;
-    clip-path: none !important;
-    background: transparent !important;
-    border: 0 !important;
-    box-shadow: none !important;
-    filter: drop-shadow(4px 4px 0 #050505) drop-shadow(0 0 6px rgba(128,220,88,.35)) !important;
-}
-[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div::before,
-[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div::before,
-[data-testid="stSidebar"] [data-testid="stExpander"]::before,
-[data-testid="stSidebar"] label[data-baseweb="checkbox"]::before {
-    content: "";
-    position: absolute;
-    inset: -2px;
-    z-index: -1;
-    background: #fff;
-    clip-path: polygon(0 12%, 6% 12%, 4% 0, 100% 0, 96% 35%, 100% 43%, 94% 100%, 0 100%, 4% 62%, 0 54%);
-    transition: background .2s ease;
-}
-[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div::after,
-[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div::after,
-[data-testid="stSidebar"] [data-testid="stExpander"]::after,
-[data-testid="stSidebar"] label[data-baseweb="checkbox"]::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    background: linear-gradient(105deg, #0b0b0b 0 70%, #151a15);
-    clip-path: polygon(0 12%, 6% 12%, 4% 0, 100% 0, 96% 35%, 100% 43%, 94% 100%, 0 100%, 4% 62%, 0 54%);
-    transition: background .25s ease;
-}
-[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div:hover::before,
-[data-testid="stSidebar"] [data-testid="stExpander"]:hover::before,
-[data-testid="stSidebar"] label[data-baseweb="checkbox"]:hover::before,
-[data-testid="stSidebar"] [data-testid="stTextInput"] > div > div:focus-within::before,
-[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div:focus-within::before { background: __GREEN__; }
-[data-testid="stSidebar"] label[data-baseweb="checkbox"] { padding: 9px 24px 9px 14px; }
-[data-testid="stSidebar"] label[data-baseweb="checkbox"]:has(input:checked)::before { background: __GREEN__; }
-[data-testid="stSidebar"] label[data-baseweb="checkbox"]:has(input:checked)::after {
-    background: linear-gradient(105deg, #1c3a12, #0b0b0b 68%);
-}
-
 </style>
 """
 for token, value in {"__PINK__": PINK, "__GREEN__": GREEN, "__BASE__": BASE,
@@ -1907,11 +1271,8 @@ for token, value in {"__PINK__": PINK, "__GREEN__": GREEN, "__BASE__": BASE,
                      "__GLITCH__": str(GLITCH_SECONDS),
                      "__BOOTTOTAL__": str(round(total_s, 2)),
                      "__BOOTREVEAL__": str(round(reveal_s, 2)),
+                     "__BTX__": str(round(reveal_s + hold_s, 2)),
                      "__PHOLD__": str(p_hold),
-                     "__PFLASH__": str(p_flash),
-                     "__PSLASHIN__": str(p_slash_in),
-                     "__PSLASHHOLD__": str(p_slash_hold),
-                     "__PWIPEEND__": str(p_wipe_end),
                      "__BOOTVH__": str(BOOT_IMAGE_VH),
                      "__LINEDELAYS__": line_delays,
                      "__WALL__": WALL_CSS, "__SIDEART__": SIDE_CSS}.items():
@@ -1935,7 +1296,6 @@ def clean_for_voice(text):
     t = re.sub(r"\s+", " ", t).strip()
     return t[:VOICE_MAX_CHARS]
 
-
 def pcm_to_wav(pcm, rate=24000):
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
@@ -1945,7 +1305,6 @@ def pcm_to_wav(pcm, rate=24000):
         w.writeframes(pcm)
     return buf.getvalue()
 
-
 import asyncio
 try:
     import edge_tts
@@ -1953,10 +1312,7 @@ try:
 except Exception:
     HAVE_EDGE = False
 
-
-# ---------- your voice -> text (speech to text, done by gemini) ----------
 def transcribe(audio_bytes):
-    """Turns a recording of you talking into text. Returns '' if it fails."""
     try:
         reply = client.models.generate_content(
             model=MODELS[0],
@@ -1971,13 +1327,11 @@ def transcribe(audio_bytes):
         st.warning("couldn't hear that (" + str(e)[:80] + "), try again")
         return ""
 
-
 def speak_edge(text):
     if not HAVE_EDGE:
         st.error("voice needs: py -m pip install edge-tts")
         return
     async def _generate():
-        # en-US-AriaNeural suaranya dewasa, alami, dan enerjik
         voice = st.session_state.get("edge_voice", "en-US-JennyNeural")
         rate = "%+d%%" % st.session_state.get("edge_rate", 10)
         pitch = "%+dHz" % st.session_state.get("edge_pitch", 5)
@@ -1995,17 +1349,14 @@ def speak_edge(text):
     except Exception as e:
         st.error(f"Voice error: {e}")
 
-# ---------- capri's cloned voice (runs on YOUR computer, unlimited, no quota) ----------
-REF_VOICE_FILE = os.path.join(HERE, "capri_ref.wav")   # 10-30s clean clip of the voice
+REF_VOICE_FILE = os.path.join(HERE, "capri_ref.wav")
 
-
-@st.cache_resource(show_spinner="loading capri's voice model (first time downloads ~2GB)...")
+@st.cache_resource(show_spinner="loading capri's voice model...")
 def load_xtts():
     import torch
     from TTS.api import TTS
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
-
 
 def speak_clone(text):
     if not os.path.exists(REF_VOICE_FILE):
@@ -2022,37 +1373,61 @@ def speak_clone(text):
         st.error("cloned voice failed (" + str(e)[:120] + "), using the preset voice")
         return False
 
-
 def speak_voice(text):
     if st.session_state.get("voice_engine", "").startswith("capri clone"):
         if speak_clone(text):
             return
     speak_edge(text)
 
+def transition_html(btx):
+    spikes = 16
+    pts = []
+    for i in range(spikes * 2):
+        r = 50.0 if i % 2 == 0 else 34.0
+        ang = math.pi * 2 * i / (spikes * 2) - math.pi / 2
+        pts.append("%.1f%% %.1f%%" % (50 + r * math.cos(ang), 50 + r * math.sin(ang)))
+    star = "polygon(" + ",".join(pts) + ")"
+    styles, rots, lifts = ["rn-a", "rn-b", "rn-c"], [-4, 3, -2, 5, -3, 2], [0, -6, 4, -3, 5, -4]
+    letters, k = [], 0
+    for ch in "WELCOME BACK":
+        if ch == " ":
+            letters.append('<span class="rn-gap"></span>')
+            continue
+        letters.append('<span class="rn %s" style="--r:%ddeg;--y:%dpx;animation-delay:calc(%ss + %ss)">%s</span>'
+                       % (styles[k % 3], rots[k % 6], lifts[k % 6], btx, round(0.25 + k * 0.025, 3), ch))
+        k += 1
+    shards = []
+    for i in range(20):
+        ang = math.radians(i * 18 + (7 if i % 2 else 0))
+        dist = 46 + (i * 7) % 26
+        shards.append('<i style="--dx:%.1fvmin;--dy:%.1fvmin;--rot:%ddeg"></i>'
+                      % (math.cos(ang) * dist, math.sin(ang) * dist * 0.7, int(math.degrees(ang)) % 180))
+    return (
+        '<div class="boot-trans">'
+        '<div class="tr-flash"></div>'
+        '<div class="tr-panel p1"></div><div class="tr-panel p2"></div><div class="tr-panel p3"></div>'
+        '<div class="tr-rays"></div>'
+        '<div class="tr-burst" style="clip-path:' + star + '"></div>'
+        '<div class="tr-shards">' + "".join(shards) + '</div>'
+        '<div class="tr-card">'
+        '<div class="tr-ransom">' + "".join(letters) + '</div>'
+        '<div class="tr-big" style="animation-delay:calc(' + str(btx) + 's + 0.5s)">CAPRI</div>'
+        '<div class="tr-bar" style="animation-delay:calc(' + str(btx) + 's + 0.6s)">LINK ESTABLISHED // HOST CONFIRMED</div>'
+        '</div></div>'
+    )
 
 def boot_overlay_html():
+    btx = round(reveal_s + hold_s, 2)
     lines = "".join(
         '<div class="boot-line bl%d">%s</div>' % (i, htmllib.escape(line))
         for i, line in enumerate(BOOT_LINES)
     )
     char = ""
-    slash_face = ""
     if char_b64:
         char = ('<div class="boot-char"><img src="data:image/png;base64,'
                 + char_b64 + '"></div>')
-        slash_face = ('<img class="p5-slash-face" src="data:image/png;base64,'
-                      + char_b64 + '">')
     return (
-        '<div class="boot-overlay">'
-        '<div class="boot-bg-top"></div>'
-        '<div class="boot-bg-bot"></div>'
-        '<div class="p5-slash-flash"></div>'
-        '<div class="p5-slash-bar">'
-        + slash_face +
-        '<div class="p5-slash-text-wrap">'
-        '<div class="p5-slash-kicker">NEURAL LINK // SYNCHRONIZED</div>'
-        '<div class="p5-slash-text">CAPRI ONLINE</div>'
-        '</div></div>'
+        '<div class="boot-overlay"><div class="boot-stage">'
         '<div class="boot-hud-top">SYS_ID: 0x88F2 // HOST_LINK: ACTIVE</div>'
         '<div class="boot-hud-bottom">CORE MEMORY: 64TB // OVERCLOCK: 4.2GHz</div>'
         + char +
@@ -2061,12 +1436,12 @@ def boot_overlay_html():
         + lines +
         '<div class="boot-progress-wrap"><div class="boot-progress-bar"></div></div>'
         '</div></div>'
+        + transition_html(btx) +
+        '</div>'
     )
-
 
 def typing_html():
     return '<div class="typing"><span>capri is typing...</span></div>'
-
 
 def is_fresh_visit():
     try:
@@ -2077,16 +1452,65 @@ def is_fresh_visit():
         pass
     return True
 
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "cam_key" not in st.session_state:
+    st.session_state.cam_key = 0
+if "av_key" not in st.session_state:
+    st.session_state.av_key = 0
+if "booted" not in st.session_state:
+    st.session_state.booted = False
 
+if "greeted" not in st.session_state:
+    st.session_state.greeted = False
+if "play_blip" not in st.session_state:
+    st.session_state.play_blip = False
+if "mic_key" not in st.session_state:
+    st.session_state.mic_key = 0
+if "mem_pending" not in st.session_state:
+    st.session_state.mem_pending = []
+if "mem_due" not in st.session_state:
+    st.session_state.mem_due = False
+if "bond_level" not in st.session_state:
+    _b, _loss, _gap = start_bond()
+    st.session_state.bond_level = _b
+    st.session_state.neglect_loss = _loss
+    st.session_state.away_seconds = _gap
+if "hack" not in st.session_state:
+    st.session_state.hack = {"active": False, "log": [], "time_limit": 0, "guards_caught": False}
 
+if BOOT_SCREEN and not st.session_state.booted:
+    st.session_state.booted = True
+    if is_fresh_visit():
+        try:
+            st.query_params["intro"] = str(round(time.time(), 1))
+        except Exception:
+            pass
+        overlay_box = st.empty()
+        overlay_box.markdown(
+            '<div style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:#020202;z-index:999999;">'
+            + boot_overlay_html() +
+            '</div>',
+            unsafe_allow_html=True
+        )
+        time.sleep(total_s)
+        overlay_box.empty()
+else:
+    st.session_state.booted = True
+
+photo = None
+watch_on = False
+voice_on = False
+rec = None
+diary_req = False
 
 _BGM_CONTROLLER = r"""
 (function () {
-  window.__capriBgmVer = 3;
+  window.__capriBgmVer = 2;
   var D = document, W = window;
   var legacy = D.getElementById('capri-bgm');
   if (legacy) { legacy.pause(); legacy.remove(); }
-  W.capriBgm = function (want, vol, tracks, mood, delayMs, fadeMs) {
+  W.capriBgm = function (want, vol, tracks, mood) {
     var S = W.__bgm = W.__bgm || { tracks: {}, cur: null, name: null, bound: false };
     var k;
     for (k in tracks) { S.tracks[k] = tracks[k]; }
@@ -2112,15 +1536,8 @@ _BGM_CONTROLLER = r"""
       el.className = 'capri-bgm'; el.loop = true; el.src = S.tracks[mood]; el.volume = 0;
       D.body.appendChild(el);
       var prev = S.cur; S.cur = el; S.name = mood;
-      var delayMs = (arguments[4] || 0);
-      var fadeMs = (arguments[5] || 2800);
-      S.waitingDelay = delayMs > 0;
-      setTimeout(function () {
-        S.waitingDelay = false;
-        if (S.cur !== el || !S.want) { return; }
-        el.play().catch(function () {});
-        fade(el, S.vol, fadeMs);
-      }, delayMs);
+      el.play().catch(function () {});
+      fade(el, S.vol, 1600);
       if (prev) { fade(prev, 0, 1600, function () { kill(prev); }); }
     } else if (S.cur) {
       fade(S.cur, S.vol, 250);
@@ -2129,7 +1546,7 @@ _BGM_CONTROLLER = r"""
       S.bound = true;
       ['click', 'keydown', 'touchstart'].forEach(function (t) {
         D.addEventListener(t, function () {
-          if (S.cur && S.cur.paused && S.want && !S.waitingDelay) { S.cur.play().catch(function () {}); }
+          if (S.cur && S.cur.paused && S.want) { S.cur.play().catch(function () {}); }
         }, true);
       });
     }
@@ -2139,14 +1556,12 @@ _BGM_CONTROLLER = r"""
 """
 _BGM_MIME = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav", ".m4a": "audio/mp4"}
 
-
 def _find_track(name):
     for e in _BGM_MIME:
         p = os.path.join(HERE, "capri_" + name + e)
         if os.path.exists(p):
             return p
     return None
-
 
 _MOOD_RE = {
     "danger": re.compile(r"\b(scared|afraid|danger|careful|hide|alarm|uh-?oh|they'?re coming|trace|angry|furious|ugh|annoyed|how dare|shut up|leave me alone)\b"),
@@ -2155,12 +1570,10 @@ _MOOD_RE = {
     "curious": re.compile(r"(\?|\b(why|how|hmm+|wonder|think|thinking|what if|tell me)\b)"),
 }
 
-
 def get_music_mood(bond, history):
-    """sweet / happy / curious / danger / home, from her bond and her latest reply."""
     h = st.session_state.get("hack")
     if h and h.get("active") and h.get("alert", 0) >= 70:
-        return "danger"                                   # the hack is going badly
+        return "danger"
     last = ""
     for m in reversed(history):
         if m["role"] == "assistant":
@@ -2176,9 +1589,7 @@ def get_music_mood(bond, history):
         return "curious"
     return "home"
 
-
 def pick_music_mood():
-    """Same as above, but calm moods wait 25s before switching so it never flickers."""
     want = get_music_mood(st.session_state.bond_level, st.session_state.history)
     cur = st.session_state.get("music_mood")
     now = time.time()
@@ -2188,36 +1599,7 @@ def pick_music_mood():
         st.session_state.music_mood_since = now
     return st.session_state.get("music_mood", want)
 
-
-
-
-if "history" not in st.session_state:
-    st.session_state.history = []
-if "cam_key" not in st.session_state:
-    st.session_state.cam_key = 0
-if "av_key" not in st.session_state:
-    st.session_state.av_key = 0
-if "booted" not in st.session_state:
-    st.session_state.booted = False
-if "greeted" not in st.session_state:
-    st.session_state.greeted = False
-if "play_blip" not in st.session_state:
-    st.session_state.play_blip = False
-if "mic_key" not in st.session_state:
-    st.session_state.mic_key = 0
-if "mem_pending" not in st.session_state:
-    st.session_state.mem_pending = []
-if "mem_due" not in st.session_state:
-    st.session_state.mem_due = False
-if "bond_level" not in st.session_state:
-    st.session_state.bond_level = 50
-if "hack" not in st.session_state:
-    st.session_state.hack = {"active": False, "log": []}
-
-
-
-def inject_home_music(on, vol, mood="home", delay_ms=0, fade_ms=3200):
-    """Plays / crossfades the mood music. Returns the track name, or None if no music files."""
+def inject_home_music(on, vol, mood="home"):
     name = mood if _find_track(mood) else "home"
     path = _find_track(name)
     if not path:
@@ -2225,76 +1607,61 @@ def inject_home_music(on, vol, mood="home", delay_ms=0, fade_ms=3200):
     if "bgm_sent_tracks" not in st.session_state:
         st.session_state.bgm_sent_tracks = []
     tracks = {}
-    if on and name not in st.session_state.bgm_sent_tracks:      # each file is only sent once
+    if on and name not in st.session_state.bgm_sent_tracks:
         with open(path, "rb") as f:
             data = base64.b64encode(f.read()).decode()
         tracks[name] = "data:%s;base64,%s" % (_BGM_MIME[os.path.splitext(path)[1]], data)
         st.session_state.bgm_sent_tracks.append(name)
     if not on:
-        st.session_state.bgm_sent_tracks = []                   # off/on again = a fresh start
+        st.session_state.bgm_sent_tracks = []
     html = ("<script>try{var P=window.parent,D=P.document;"
-            "if(P.__capriBgmVer!==3){var s=D.createElement('script');s.textContent="
+            "if(P.__capriBgmVer!==2){var s=D.createElement('script');s.textContent="
             + json.dumps(_BGM_CONTROLLER) + ";D.head.appendChild(s);}"
             "P.capriBgm(" + ("true" if on else "false") + "," + str(vol / 100.0) + ","
-            + json.dumps(tracks) + "," + json.dumps(name) + ","
-            + str(int(delay_ms)) + "," + str(int(fade_ms)) + ");}catch(e){}</script>")
+            + json.dumps(tracks) + "," + json.dumps(name) + ");}catch(e){}</script>")
     components.html(html, height=0)
     return name
 
-
-# ---------- being nice or mean changes the bond (and so the music) ----------
 _MEAN_RE = re.compile(r"\b(shut up|stupid|idiot|hate you|useless|dumb|ugly|annoying|go away|trash|loser)\b")
+_SORRY_RE = re.compile(r"\b(sorry|my bad|forgive me|i didn'?t mean)\b")
 _NICE_RE = re.compile(r"\b(love you|thank you|thanks|miss you|proud of you|you'?re sweet|good job|cute|best friend|glad you)\b")
-
 
 def bond_change(msg):
     t = msg.lower()
     if _MEAN_RE.search(t):
         return -6
+    if _SORRY_RE.search(t):
+        return 4
     if _NICE_RE.search(t):
         return 2
     return 1
 
+def judge_message(msg):
+    delta = bond_change(msg)
+    notes = []
+    now = time.time()
+    last_ts = st.session_state.get("last_msg_ts")
+    if last_ts and now - last_ts > IDLE_ANNOY_MIN * 60:
+        delta -= 3
+        notes.append("the host ignored you for about %d minutes before writing back, and it annoyed you"
+                     % int((now - last_ts) / 60))
+    prev = [m["text"] for m in st.session_state.history if m["role"] == "user"]
+    if prev and prev[-1].strip().lower() == msg.strip().lower():
+        delta -= 3
+        notes.append("the host just repeated the exact same message, which annoys you")
+    st.session_state.last_msg_ts = now
+    return delta, "; ".join(notes)
 
-voice_status_box = None
-mic_text = None
-rec = None
-diary_req = False
-
-
-
-if BOOT_SCREEN and not st.session_state.booted:
-    st.session_state.booted = True
-    if is_fresh_visit():
-        try:
-            st.query_params["intro"] = str(round(time.time(), 1))
-        except Exception:
-            pass
-        st.session_state.just_booted_bgm = True
-        overlay_box = st.empty()
-        overlay_box.markdown(boot_overlay_html(), unsafe_allow_html=True)
-        if st.session_state.get("music_on", True):
-            _slash_delay_ms = int((reveal_s + hold_s) * 1000)
-            inject_home_music(True, st.session_state.get("music_vol", 25),
-                              pick_music_mood(), delay_ms=_slash_delay_ms, fade_ms=3400)
-        time.sleep(total_s + 0.2)
-        overlay_box.empty()
-st.session_state.booted = True
-
-photo = None
-watch_on = False
-voice_on = False
-# ---------- mood music: five loops that crossfade with how she feels ----------
 def get_capri_mood(bond, text_history):
     last_reply = text_history[-1]["text"].lower() if text_history else ""
+    if bond < 30:
+        return "😠 Annoyed & Distant", "#ff3131"
     if any(w in last_reply for w in ["haha", "hehe", "love", "miss", "😏"]):
         return "😄 Happy & Teasing", "#80dc58"
     elif any(w in last_reply for w in ["?", "why", "hmm", "thinking"]):
         return "🤔 Curious & Analytical", "#50b4ff"
     elif any(w in last_reply for w in ["!", "wow", "omg", "oh"]):
         return "✨ Surprised & Excited", "#ff3131"
-    elif bond < 30:
-        return "🌧️ Distant / Low Connection", "#aaaaaa"
     else:
         return "✨ Chill & Bonded", "#ff3131"
 
@@ -2346,16 +1713,19 @@ with st.sidebar:
         st.caption("State: Deep Synergy · Unlocked full trust")
     elif st.session_state.bond_level >= 50:
         st.caption("State: Stable Sync · Friendly & playful")
-    else:
+    elif st.session_state.bond_level >= 30:
         st.caption("State: Low Signal · Needs more interaction")
+    else:
+        st.caption("State: Upset · say sorry or be kind to win her back")
+    if _STATE_STATUS["ok"]:
+        st.caption("💾 auto-saved · she remembers this next time")
+    else:
+        st.caption("⚠ can't save her bond (check the folder's permissions)")
 
     if not wall:
-        st.warning("wallpaper not found. looking in: " + HERE
-                   + " | images seen there: " + (", ".join(list_images()) or "none"))
+        st.warning("wallpaper not found. looking in: " + HERE)
     if BOOT_SCREEN and not char_b64:
-        st.warning("no loading screen picture found. save it as capri_boot.png in: "
-                   + HERE + " | images seen there: "
-                   + (", ".join(list_images()) or "none"))
+        st.warning("no loading screen picture found. save it as capri_boot.png in: " + HERE)
     st.header("settings")
 
     with st.expander("your avatar"):
@@ -2391,38 +1761,33 @@ with st.sidebar:
     music_vol = 25
     if music_on:
         music_vol = st.slider("music volume", 0, 100, 25, key="music_vol")
-    _fade_duration = 3400 if st.session_state.pop("just_booted_bgm", False) else 2600
-    _playing = inject_home_music(music_on, music_vol, pick_music_mood(), delay_ms=0, fade_ms=_fade_duration)
+    _playing = inject_home_music(music_on, music_vol, pick_music_mood())
     if not _playing:
-        st.caption("put capri_home.mp3 (plus capri_sweet / happy / curious / danger .mp3) next to capri_app.py")
+        st.caption("put capri_home.mp3 next to capri_app.py")
     elif music_on:
-        st.caption("♪ now playing: " + _playing + " · starts after your first click")
+        st.caption("♪ now playing: " + _playing)
 
     voice_on = st.toggle("capri's voice", key="voice_on")
     if voice_on:
         st.radio("voice engine",
                  ["preset (free, instant)", "capri clone (local, needs setup)"],
                  key="voice_engine")
-        pick = st.selectbox("preset voice (also the backup)", list(EDGE_VOICES.keys()),
+        pick = st.selectbox("preset voice", list(EDGE_VOICES.keys()),
                             key="edge_voice_label")
         st.session_state.edge_voice = EDGE_VOICES[pick]
         st.slider("preset speed", -20, 40, 18, format="%d%%", key="edge_rate")
-        st.slider("preset pitch (higher = younger / cuter)", -10, 30, 20, format="%dHz", key="edge_pitch")
-        st.caption("her replies are turned into speech by microsoft's edge voice service.")
+        st.slider("preset pitch", -10, 30, 20, format="%dHz", key="edge_pitch")
 
     mic_on = st.toggle("talk to capri (microphone)", key="mic_on")
     if mic_on:
         if hasattr(st, "audio_input"):
             rec = st.audio_input("press the mic, talk, then press stop",
                                  key="mic_" + str(st.session_state.mic_key))
-            st.caption("your voice clip is sent to google to be turned into text.")
         else:
-            st.warning("mic needs a newer streamlit: py -m pip install -U streamlit")
+            st.warning("mic needs a newer streamlit version")
 
     if HAVE_WEBRTC:
         watch_on = st.toggle("she watches (live camera)", key="watch_on")
-    else:
-        st.caption("live camera needs: py -m pip install streamlit-webrtc")
     if watch_on:
         st.slider("glance every (seconds)", 3, 90, 10, key="watch_secs")
         webrtc_streamer(
@@ -2451,7 +1816,7 @@ with st.sidebar:
                 save_memories([])
                 st.rerun()
         else:
-            st.caption("no memories recorded yet. talk to her and she'll remember key details.")
+            st.caption("no memories recorded yet.")
 
     with st.expander("things she tried through you"):
         _firsts = load_firsts()
@@ -2459,7 +1824,7 @@ with st.sidebar:
             for f in reversed(_firsts[-15:]):
                 st.text("• " + f.get("what", "") + "  (" + f.get("date", "") + ")")
         else:
-            st.caption("nothing yet. tell her about food, music, weather, places...")
+            st.caption("nothing yet.")
 
     with st.expander("capri's diary"):
         if st.button("write today's entry", key="diary_btn"):
@@ -2470,7 +1835,7 @@ with st.sidebar:
                 st.markdown("**" + _day + "**")
                 st.write(_diary[_day])
         else:
-            st.caption("she hasn't written anything yet. chat a bit, then press the button.")
+            st.caption("she hasn't written anything yet.")
 
     chat_lines = [("you" if m["role"] == "user" else "capri") + ": " + m["text"]
                   for m in st.session_state.history]
@@ -2485,6 +1850,10 @@ with st.sidebar:
         st.session_state.history = []
         st.session_state.greeted = False
         st.rerun()
+    if st.button("reset bond to 50%"):
+        set_bond(50)
+        st.session_state.pop("music_mood", None)
+        st.rerun()
     if st.button("replay intro"):
         try:
             st.query_params.clear()
@@ -2493,7 +1862,6 @@ with st.sidebar:
         st.session_state.booted = False
         st.rerun()
 
-# API Key Validation Check (Placed AFTER sidebar definition so user_api_key exists)
 if not user_api_key:
     st.warning("Please enter your Gemini API key in the sidebar to start chatting.")
     st.stop()
@@ -2501,11 +1869,11 @@ if not user_api_key:
 client = genai.Client(api_key=user_api_key, http_options=types.HttpOptions(timeout=60000))
 tts_client = genai.Client(api_key=user_api_key, http_options=types.HttpOptions(api_version="v1beta", timeout=60000))
 
-# Handle microphone transcription if recording exists
+mic_text = None
 if mic_on and rec is not None:
     with st.spinner("listening..."):
         mic_text = transcribe(rec.getvalue())
-    st.session_state.mic_key += 1   # fresh recorder, so this clip is never re-sent
+    st.session_state.mic_key += 1
 
 st.markdown(
     '<div class="capri-title">'
@@ -2520,24 +1888,27 @@ st.markdown(
 if SHE_TEXTS_FIRST and not st.session_state.greeted and not st.session_state.history:
     greet_box = st.empty()
     greet_box.markdown(typing_html(), unsafe_allow_html=True)
-    time.sleep(1.3)
+    time.sleep(1.0)
     greet_box.empty()
     st.session_state.history.append(
         {"role": "assistant", "text": missed_you_message() or pick_greeting()})
     st.session_state.play_blip = True
+    if st.session_state.get("neglect_loss"):
+        st.toast("she's upset... you were gone %s (bond -%d)"
+                 % (describe_gap(st.session_state.get("away_shown", 0)), st.session_state.neglect_loss),
+                 icon="😠")
+        st.session_state.neglect_loss = 0
 st.session_state.greeted = True
 
-
-_FACE_RULES = [   # (picture file, words that trigger it) - checked in this order
+_FACE_RULES = [
     ("capri_scared.png", r"\b(scared|afraid|danger|careful|hide|alarm|uh-?oh|they'?re coming|trace|run)\b"),
     ("capri_angry.png", r"\b(angry|furious|mad|ugh|annoyed|how dare|i hate|shut up)\b"),
     ("capri_sleepy.png", r"\b(sleepy|tired|yawn|zzz+|goodnight|good night|nap|exhausted|bed)\b"),
 ]
 
-
 def get_dynamic_avatar(text):
     t = text.lower()
-    for fname, pattern in _FACE_RULES:       # new moods only show if the picture exists
+    for fname, pattern in _FACE_RULES:
         path = os.path.join(HERE, fname)
         if os.path.exists(path) and re.search(pattern, t):
             return path
@@ -2554,17 +1925,13 @@ def get_dynamic_avatar(text):
     path = os.path.join(HERE, "capri_avatar.png")
     return path if os.path.exists(path) else CAPRI_AVATAR
 
-
 FRAG_RE = re.compile(r"^\s*//\s*(.+)$", re.M)
 
-
 def split_reply(text):
-    """-> (what she says, the other voice's line or None)"""
     t = text.replace("[ASK]", "")
     frags = FRAG_RE.findall(t)
     main = FRAG_RE.sub("", t).strip()
     return (main or t.strip()), (" ".join(f.strip() for f in frags) if frags else None)
-
 
 def show_message(i, m):
     if m["role"] == "user":
@@ -2581,11 +1948,9 @@ def show_message(i, m):
                 if frag:
                     st.caption("// " + frag)
 
-
 for i, m in enumerate(st.session_state.history):
     show_message(i, m)
 
-# she asked permission for something dangerous -> answer with a tap
 _hist = st.session_state.history
 if (_hist and _hist[-1]["role"] == "assistant" and "[ASK]" in _hist[-1]["text"]
         and not st.session_state.get("quick_reply")):
@@ -2600,7 +1965,6 @@ if (_hist and _hist[-1]["role"] == "assistant" and "[ASK]" in _hist[-1]["text"]
         st.session_state.quick_reply = "(do whatever you want, surprise me)"
         st.rerun()
 
-
 HACK_TARGETS = [
     "the megacorp vault under the noodle district",
     "every traffic light on the main strip",
@@ -2608,63 +1972,88 @@ HACK_TARGETS = [
     "the vending machine empire",
     "the city's neon sign grid",
 ]
-HACK_MAX_TURNS = 15
-
+HACK_MAX_TOOL_TURNS = 10
 
 def run_hack(cmd):
     h = st.session_state.hack
+    now_ts = time.time()
+    if h.get("time_limit") and now_ts > h["time_limit"]:
+        h["active"] = False
+        h["guards_caught"] = True
+        h["log"].append("> TIME LIMIT EXPIRED! THE GUARDS CAUGHT US!")
+        set_bond(max(0, st.session_state.bond_level - 8))
+        return
+
+    rng_fail = random.random() < 0.35 
+
     prompt = (
         "You are Capri, a chaotic, playful digital construct, narrating a tiny pretend text game "
-        "where your host 'hacks' a fictional target. It is pure fiction: never give real hacking "
-        "steps, tools or code. Target: %s. Breach progress: %d/100. Alert level: %d/100. "
-        "Turn %d of %d.\nRecent log:\n%s\n\nThe host typed this command: \"%s\"\n\n"
+        "where your host 'hacks' a fictional target. Target: %s. Breach progress: %d/100. Alert level: %d/100. "
+        "Turn %d of %d. "
+        "%s\nRecent log:\n%s\n\nThe host typed this command: \"%s\"\n\n"
         "Narrate what happens in one or two short sentences in your own voice (texting style, "
-        "a little weird, no asterisks). Smart or creative commands raise progress; reckless or "
-        "silly ones raise the alert. Return ONLY JSON like "
-        "{\"narration\": \"...\", \"progress_delta\": 15, \"alert_delta\": 5} with progress_delta "
-        "from -10 to 30 and alert_delta from 0 to 35."
-        % (h["target"], h["progress"], h["alert"], h["turns"] + 1, HACK_MAX_TURNS,
+        "a little weird, no asterisks). Make it unpredictable: sometimes things backfire or nearly fail (50/50 chance). "
+        "Return ONLY JSON like "
+        "{\"narration\": \"...\", \"progress_delta\": 15, \"alert_delta\": 5}"
+        % (h["target"], h["progress"], h["alert"], h["turns"] + 1, HACK_MAX_TOOL_TURNS,
+           "NOTE: This turn has a sudden complication or setback!" if rng_fail else "",
            "\n".join(h["log"][-6:]), cmd.replace('"', "'"))
     )
-    reply = client.models.generate_content(
-        model=st.session_state.get("model_pick", MODELS[0]),
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            max_output_tokens=300, response_mime_type="application/json"),
-    )
-    data = json.loads(reply.text or "{}")
+    try:
+        reply = client.models.generate_content(
+            model=st.session_state.get("model_pick", MODELS[0]),
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                max_output_tokens=300, response_mime_type="application/json"),
+        )
+        data = json.loads(reply.text or "{}")
+    except Exception:
+        data = {"narration": "static interference... connection glitching out!", "progress_delta": -5, "alert_delta": 10}
+
     if not isinstance(data, dict):
         data = {}
     try:
-        dp = max(-10, min(30, int(data.get("progress_delta", 8))))
-        da = max(0, min(35, int(data.get("alert_delta", 5))))
+        dp = max(-20, min(25, int(data.get("progress_delta", 5))))
+        da = max(-5, min(30, int(data.get("alert_delta", 10))))
     except Exception:
-        dp, da = 8, 5
+        dp, da = 5, 10
+
+    if rng_fail:
+        dp = -abs(dp)
+        da += 10
+
     h["progress"] = max(0, min(100, h["progress"] + dp))
     h["alert"] = max(0, min(100, h["alert"] + da))
     h["turns"] += 1
     h["log"].append("> " + cmd)
     h["log"].append("capri: " + str(data.get("narration", "...static...")).strip()[:300])
+    
+    h["time_limit"] = time.time() + 25
+
     if h["progress"] >= 100:
         h["active"] = False
-        h["log"].append("> BREACH COMPLETE. capri: we did it!! hehe")
-        st.session_state.bond_level = min(100, st.session_state.bond_level + 5)
-    elif h["alert"] >= 100 or h["turns"] >= HACK_MAX_TURNS:
+        h["guards_caught"] = False
+        h["log"].append("> BREACH COMPLETE. capri: we pulled it off right on the edge!! hehe")
+        set_bond(st.session_state.bond_level + 8)
+    elif h["alert"] >= 100 or h["turns"] >= HACK_MAX_TOOL_TURNS:
         h["active"] = False
-        h["log"].append("> TRACE COMPLETE. capri: run run run, they found us!")
-
+        h["guards_caught"] = True
+        h["log"].append("> SECURITY FORCES BREACHED THE ROOM! CAPRI: QUICK, PULL THE CHIP!")
+        set_bond(max(0, st.session_state.bond_level - 10))
 
 HACK_CSS = """
 <style>
 .hk{position:relative;background:#020202;border:3px solid __GREEN__;box-shadow:0 0 18px __GREEN__55, inset 0 0 40px #000;font-family:Consolas,"Courier New",monospace;color:#d8ffd0;padding:0 0 12px;overflow:hidden;margin-bottom:10px}
-.hk.hot{border-color:__PINK__;box-shadow:0 0 22px __PINK__99, inset 0 0 40px #000;animation:hkpulse .9s infinite}
-.hk::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px)}
+.hk.hot{border-color:__PINK__;box-shadow:0 0 22px __PINK__99, inset 0 0 40px #000}
 .hk-top{display:flex;justify-content:space-between;align-items:center;background:__GREEN__;color:#000;font-weight:900;padding:4px 10px;font-size:.8rem;letter-spacing:.12em}
 .hk.hot .hk-top{background:__PINK__}
-.hk-live::before{content:"●";margin-right:6px;animation:hkblink 1s steps(2) infinite}
-.hk-title{display:inline-block;margin:12px 12px 6px;padding:4px 16px;border:4px double __GREEN__;color:__GREEN__;text-shadow:2px 0 __PINK__,-2px 0 #50b4ff;font-size:.9rem;font-weight:900;letter-spacing:.12em;white-space:nowrap}
-.hk.hot .hk-title{border-color:__PINK__;color:__PINK__;text-shadow:2px 0 __GREEN__,-2px 0 #50b4ff}
+.hk-title{display:inline-block;margin:12px 12px 6px;padding:4px 16px;border:4px double __GREEN__;color:__GREEN__;font-size:.9rem;font-weight:900;letter-spacing:.12em}
+.hk.hot .hk-title{border-color:__PINK__;color:__PINK__}
 .hk-target{padding:2px 12px 8px;color:#9fe8ff;font-size:.85rem}
+.hk-timer-box{margin:8px 12px;padding:10px;background:#140003;border:3px dashed __PINK__;box-shadow:0 0 15px __PINK__77;text-align:center;animation:pulseTimer 1s infinite alternate}
+@keyframes pulseTimer { from { opacity: 0.85; } to { opacity: 1; border-color: #ff8888; } }
+.hk-timer-lbl{font-size:.7rem;color:#ff8888;font-weight:900;letter-spacing:.2em}
+.hk-timer-val{font-size:1.8rem;color:#ffffff;font-weight:900;letter-spacing:.1em;text-shadow:0 0 10px __PINK__}
 .hk-meters{padding:0 12px}
 .hk-m{margin:5px 0}
 .hk-lab{display:flex;justify-content:space-between;font-size:.72rem;letter-spacing:.14em;font-weight:900}
@@ -2672,35 +2061,22 @@ HACK_CSS = """
 .hk-fill{height:100%;transition:width .6s}
 .hk-g{background:linear-gradient(90deg,#2d7a1a,__GREEN__);box-shadow:0 0 10px __GREEN__}
 .hk-r{background:linear-gradient(90deg,#8a0f0f,__PINK__);box-shadow:0 0 10px __PINK__}
-.hk-bar::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 9px,#000 9px 11px)}
-.hk-warn{color:__PINK__;text-align:center;font-weight:900;letter-spacing:.2em;font-size:.8rem;margin:8px 0 0;animation:hkblink .6s steps(2) infinite}
+.hk-warn{color:__PINK__;text-align:center;font-weight:900;letter-spacing:.2em;font-size:.8rem;margin:8px 0 0}
 .hk-log{margin:10px 12px 0;padding:8px 10px;background:#000;border:1px solid #1f3a1a}
 .hk-line{margin:3px 0;font-size:.88rem;line-height:1.35;word-break:break-word}
 .hk-cmd{color:#50b4ff}
 .hk-prompt{color:__GREEN__;margin-right:6px}
 .hk-capri{color:#fff}
 .hk-tag{background:__PINK__;color:#000;font-weight:900;font-size:.7rem;padding:0 5px;margin-right:6px}
-.hk-sys{color:__GREEN__;text-shadow:0 0 6px __GREEN__}
-.hk-bad{color:__PINK__;text-shadow:0 0 6px __PINK__}
+.hk-sys{color:__GREEN__}
+.hk-bad{color:__PINK__}
 .hk-dim{color:#777}
-.hk-new{animation:hkin .5s ease-out}
-.hk-cur::after{content:"█";color:__GREEN__;animation:hkblink 1s steps(2) infinite}
 .hk-banner{margin:10px 12px 0;padding:8px;text-align:center;font-weight:900;letter-spacing:.25em;font-size:1.05rem;color:#000}
-.hk-win{background:__GREEN__;animation:hkglitch .25s 3}
-.hk-lose{background:__PINK__;animation:hkshake .4s 3}
-@keyframes hkblink{50%{opacity:0}}
-@keyframes hkpulse{50%{box-shadow:0 0 6px __PINK__55, inset 0 0 40px #000}}
-@keyframes hkin{from{opacity:0;transform:translateX(-10px);filter:blur(2px)}to{opacity:1;transform:none;filter:none}}
-@keyframes hkshake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
-@keyframes hkglitch{33%{transform:translateX(4px);text-shadow:-3px 0 #50b4ff}66%{transform:translateX(-4px);text-shadow:3px 0 __PINK__}}
+.hk-win{background:__GREEN__}
+.hk-lose{background:__PINK__}
 </style>
 """
 HACK_CSS = "".join(l.strip() for l in HACK_CSS.splitlines()).replace("__GREEN__", GREEN).replace("__PINK__", PINK)
-
-HACK_TITLE = ("╔═══════════════════════════════╗\n"
-              "║  C A P R I  //  B R E A C H   ║\n"
-              "╚═══════════════════════════════╝")
-
 
 def hack_panel_html(h):
     e = htmllib.escape
@@ -2708,86 +2084,94 @@ def hack_panel_html(h):
     active = bool(h.get("active"))
     prog, alert = int(h.get("progress", 0)), int(h.get("alert", 0))
     last = log[-1] if log else ""
-    hot = active and alert >= 70
-    right = ("TURN %d/%d" % (h.get("turns", 0), HACK_MAX_TURNS)) if active else ""
+    hot = active and (alert >= 60 or h.get("guards_caught"))
+    right = ("TURN %d/%d" % (h.get("turns", 0), HACK_MAX_TOOL_TURNS)) if active else ""
+    time_limit = max(0, int(h.get("time_limit", 0) - time.time())) if active else 0
+
     out = ['<div class="hk%s">' % (" hot" if hot else ""),
-           '<div class="hk-top"><span class="hk-live">%s</span><span>%s</span></div>'
-           % ("LIVE" if active else ("BREACHED" if last.startswith("> BREACH")
-                                     else "TRACED" if last.startswith("> TRACE") else "STANDBY"), right),
-           '<div class="hk-title">C A P R I &nbsp;//&nbsp; B R E A C H</div>']
+           '<div class="hk-top"><span>%s</span><span>%s</span></div>'
+           % ("LIVE (50/50 RISK)" if active else ("BREACHED" if last.startswith("> BREACH")
+                                     else "CAUGHT BY GUARDS" if h.get("guards_caught") else "STANDBY"), right),
+           '<div class="hk-title">C A P R I &nbsp;//&nbsp; B R E A C Ｈ</div>']
     if h.get("target"):
         out.append('<div class="hk-target">TARGET &gt; %s</div>' % e(h["target"]))
+    if active:
+        out.append('<div class="hk-timer-box">'
+                   '<div class="hk-timer-lbl">⚠️ ACTION TIME LIMIT ⚠️</div>'
+                   '<div class="hk-timer-val">%02d SECONDS</div>'
+                   '</div>' % time_limit)
     if active or h.get("target"):
         out.append('<div class="hk-meters">'
-                   '<div class="hk-m"><div class="hk-lab"><span>BREACH</span><span>%d%%</span></div>'
+                   '<div class="hk-m"><div class="hk-lab"><span>BREACH PROGRESS</span><span>%d%%</span></div>'
                    '<div class="hk-bar"><div class="hk-fill hk-g" style="width:%d%%"></div></div></div>'
-                   '<div class="hk-m"><div class="hk-lab"><span>ALERT</span><span>%d%%</span></div>'
+                   '<div class="hk-m"><div class="hk-lab"><span>GUARD ALERT LEVEL</span><span>%d%%</span></div>'
                    '<div class="hk-bar"><div class="hk-fill hk-r" style="width:%d%%"></div></div></div>'
                    '</div>' % (prog, prog, alert, alert))
     if hot:
-        out.append('<div class="hk-warn">⚠ TRACE CLOSING IN ⚠</div>')
+        out.append('<div class="hk-warn">⚠ HIGH ALERT / GUARDS CLOSING IN! ⚠</div>')
     if log:
         rows = []
         shown = log[-10:]
-        for idx, line in enumerate(shown):
-            new = " hk-new" if idx >= len(shown) - 2 else ""
+        for line in shown:
             t = e(line)
             if line.startswith("capri:"):
-                rows.append('<div class="hk-line hk-capri%s"><span class="hk-tag">CAPRI</span>%s</div>'
-                            % (new, t[6:].strip()))
-            elif line.startswith("> TRACE"):
-                rows.append('<div class="hk-line hk-bad%s">%s</div>' % (new, t))
+                rows.append('<div class="hk-line hk-capri"><span class="hk-tag">CAPRI</span>%s</div>'
+                            % t[6:].strip())
+            elif line.startswith("> TRACE") or line.startswith("> TIME") or line.startswith("> SECURITY"):
+                rows.append('<div class="hk-line hk-bad">%s</div>' % t)
             elif line.startswith("> BREACH") or line.startswith("> target"):
-                rows.append('<div class="hk-line hk-sys%s">%s</div>' % (new, t))
+                rows.append('<div class="hk-line hk-sys">%s</div>' % t)
             elif line.startswith("> you pulled"):
                 rows.append('<div class="hk-line hk-dim">%s</div>' % t)
             elif line.startswith("> "):
-                rows.append('<div class="hk-line hk-cmd%s"><span class="hk-prompt">&gt;</span>%s</div>'
-                            % (new, e(line[2:])))
+                rows.append('<div class="hk-line hk-cmd"><span class="hk-prompt">&gt;</span>%s</div>'
+                            % e(line[2:]))
             else:
                 rows.append('<div class="hk-line">%s</div>' % t)
-        if active:
-            rows.append('<div class="hk-line hk-cur"></div>')
         out.append('<div class="hk-log">%s</div>' % "".join(rows))
     if last.startswith("> BREACH"):
-        out.append('<div class="hk-banner hk-win">ACCESS GRANTED</div>')
-    elif last.startswith("> TRACE"):
-        out.append('<div class="hk-banner hk-lose">CONNECTION LOST</div>')
+        out.append('<div class="hk-banner hk-win">ACCESS GRANTED // SUCCESS</div>')
+    elif h.get("guards_caught"):
+        out.append('<div class="hk-banner hk-lose">CAUGHT BY GUARDS // FAILED</div>')
     out.append("</div>")
     return HACK_CSS + "".join(out)
 
-
-with st.expander("hack the mainframe (mini game)"):
+with st.expander("hack the mainframe (50/50 risk & timed mode)"):
     _h = st.session_state.hack
     st.markdown(hack_panel_html(_h), unsafe_allow_html=True)
     if _h["active"]:
+        if time.time() > _h.get("time_limit", 0):
+            _h["active"] = False
+            _h["guards_caught"] = True
+            _h["log"].append("> TIMELIMIT EXPIRED! GUARDS CAUGHT YOU IN THE ACT!")
+            set_bond(max(0, st.session_state.bond_level - 10))
+            st.rerun()
+
         with st.form("hack_form", clear_on_submit=True):
-            _cmd = st.text_input("command", placeholder="scan, ping the guards, sneak in, ...")
-            _go = st.form_submit_button("run")
+            _cmd = st.text_input("command", placeholder="bypass firewall, overload server...")
+            _go = st.form_submit_button("execute command")
         if _go and _cmd.strip():
-            with st.spinner("capri is typing..."):
+            with st.spinner("capri is scrambling..."):
                 try:
                     run_hack(_cmd.strip()[:80])
                 except Exception as e:
-                    st.warning("static on the line (" + str(e)[:80] + "), try again")
+                    st.warning("signal dropped (" + str(e)[:80] + ")")
                 else:
                     st.session_state.play_blip = True
                     st.rerun()
-        if st.button("give up", key="hack_quit"):
-            st.session_state.hack = {"active": False, "log": _h["log"] + ["> you pulled the plug."]}
+        if st.button("abort / pull plug", key="hack_quit"):
+            st.session_state.hack = {"active": False, "guards_caught": False, "log": _h["log"] + ["> you aborted just in time."]}
             st.rerun()
     else:
-        st.caption("type commands and she narrates what happens. win by breaching "
-                   "before the alert fills up. winning gives a little bond boost.")
-        if st.button("start a new hack", key="hack_start"):
+        if st.button("start risky hack operation", key="hack_start"):
             _target = random.choice(HACK_TARGETS)
             st.session_state.hack = {
                 "active": True, "target": _target, "progress": 0, "alert": 0, "turns": 0,
+                "time_limit": time.time() + 25, "guards_caught": False,
                 "log": ["> target locked: " + _target,
-                        "capri: i'm in your head. type commands and i'll narrate. try 'scan'!"],
+                        "capri: connection established! enter your first command to start the timer!"],
             }
             st.rerun()
-
 
 def build_contents():
     out = []
@@ -2808,13 +2192,14 @@ def build_contents():
         ))
     return out
 
-
 user = st.chat_input("say something to capri...")
 if not user and mic_text:
     user = mic_text
 if not user and st.session_state.get("quick_reply"):
     user = st.session_state.pop("quick_reply")
 if user:
+    _delta, _note = judge_message(user)
+    st.session_state.mood_note = _note
     entry = {"role": "user", "text": user}
     if photo is not None:
         entry["image"] = photo.getvalue()
@@ -2835,7 +2220,7 @@ if user:
                 max_output_tokens=1000,
             ),
         )
-        text = reply.text or "(she sent nothing, try again)"
+        text = reply.text or "(she sent nothing)"
         
         if len(user.split()) >= 3:
             st.session_state.mem_pending.append(user)
@@ -2849,14 +2234,14 @@ if user:
         st.stop()
     typing_box.empty()
 
-    st.session_state.bond_level = min(100, max(0, st.session_state.bond_level + bond_change(user)))
+    set_bond(st.session_state.bond_level + _delta)
+    st.session_state.pop("mood_note", None)
 
     st.session_state.history.append({"role": "assistant", "text": text})
     st.session_state.cam_key += 1
     st.session_state.play_blip = True
     st.session_state.speak_text = text
     st.rerun()
-
 
 speak_text = st.session_state.pop("speak_text", None)
 if st.session_state.play_blip:
@@ -2876,8 +2261,7 @@ if st.session_state.mem_due:
     try:
         update_memories(batch)
     except Exception:
-        pass        # memory is a bonus, never break the chat for it
-
+        pass
 
 def write_diary():
     hist = list(st.session_state.history)[-30:]
@@ -2887,9 +2271,8 @@ def write_diary():
     reply = client.models.generate_content(
         model=st.session_state.get("model_pick", MODELS[0]),
         contents=("Write today's diary entry as Capri, in first person: 3 to 5 short sentences, "
-                  "texting style, chaotic and a little weird. No headers, no lines starting with //, "
-                  "no [ASK] tag, no asterisks. Write about what you and your host did or talked "
-                  "about and how you felt. Today's chat:\n" + convo),
+                  "texting style. No headers, no lines starting with //, "
+                  "no [ASK] tag, no asterisks. Today's chat:\n" + convo),
         config=types.GenerateContentConfig(
             system_instruction=get_full_persona(), max_output_tokens=500),
     )
@@ -2901,20 +2284,18 @@ def write_diary():
         return True
     return False
 
-
 if diary_req:
     if not st.session_state.history:
-        st.toast("talk to her first, then she has something to write about")
+        st.toast("talk to her first")
     else:
         _ok = False
         with st.spinner("she's writing..."):
             try:
                 _ok = write_diary()
             except Exception as e:
-                st.warning("couldn't write it (" + str(e)[:80] + "), try again")
+                st.warning("couldn't write it")
         if _ok:
             st.rerun()
-
 
 def watch_contents(jpeg_bytes):
     out = []
@@ -2940,14 +2321,13 @@ def watch_contents(jpeg_bytes):
     ))
     return out
 
-
 def watch_tick():
     secs = st.session_state.get("watch_secs", 10)
     with holder["lock"]:
         img = holder["frame"]
         age = (time.time() - holder["time"]) if holder["time"] else 999
     if img is None or age > 6:
-        st.caption("Start The Camera Sweaty~... cant wait to see ya~")
+        st.caption("Start The Camera Sweaty~")
         return
 
     now = time.time()
@@ -2959,7 +2339,7 @@ def watch_tick():
     st.session_state.watch_prev = small
     quiet_for = now - st.session_state.get("watch_last_comment", 0.0)
     if not changed and quiet_for < WATCH_HEARTBEAT:
-        st.caption("im bored, give me something new!")
+        st.caption("im bored!")
         return
 
     st.session_state.watch_last_call = now
@@ -2975,12 +2355,11 @@ def watch_tick():
             ),
         )
         text = (reply.text or "").strip()
-    except Exception as e:
-        st.caption("try again pls? (" + str(e)[:70] + "), will try again")
+    except Exception:
         return
 
     if not text or text.lower().startswith("[quiet"):
-        st.caption("im watching~ · but quiet")
+        st.caption("im watching~ · quiet")
         return
 
     st.session_state.history.append({"role": "assistant", "text": text})
@@ -2988,7 +2367,6 @@ def watch_tick():
     st.session_state.play_blip = True
     st.session_state.speak_text = text
     st.rerun()
-
 
 if watch_on and HAVE_WEBRTC:
     st.fragment(run_every=st.session_state.get("watch_secs", 10))(watch_tick)()
